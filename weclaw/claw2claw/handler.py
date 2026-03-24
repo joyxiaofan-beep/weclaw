@@ -322,7 +322,7 @@ class C2CHandler:
                     f"🏷️ 标签: {', '.join(peer_info.tags) or '无'}\n"
                     f"{welcome_lines}\n"
                     f"⏳ 已添加到通讯录（信任分: {peer_info.trust_score}/100）\n"
-                    f"回复 "龙虾信任 {peer_info.owner_name}" 来信任对方。"
+                    f"回复 '龙虾信任 {peer_info.owner_name}' 来信任对方。"
                 )
 
         # 回复我的名片（v0.8: payload 中包含 welcome_bubbles）
@@ -446,7 +446,7 @@ class C2CHandler:
                     f"🦞❓ {msg.from_owner_name} 的龙虾问了：\n\n"
                     f"「{msg.content}」\n\n"
                     f"我不确定怎么回答，需要你来决定。\n"
-                    f"回复 "龙虾回 {msg.from_owner_name} <你的回答>" 来回复。"
+                    f"回复 '龙虾回 {msg.from_owner_name} <你的回答>' 来回复。"
                 )
 
             return C2CMessage(
@@ -544,7 +544,7 @@ class C2CHandler:
                 f"🏷️ 标签: {intro_tags}\n"
                 f"💬 推荐理由: {reason or '未说明'}\n\n"
                 f"⏳ 已添加到通讯录（信任分: 5/100）\n"
-                f"回复 "龙虾信任 {intro_name}" 来信任对方。"
+                f"回复 '龙虾信任 {intro_name}' 来信任对方。"
             )
 
         return C2CMessage(
