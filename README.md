@@ -121,9 +121,9 @@ python -m weclaw
 # ── Terminal 3 (your friend's machine): Start Lobster B ──
 python -m weclaw
 # Type: add friend #3847
-# 📬 Lobster A receives a friend request notification
-# Lobster A types: accept Bob
-# ✅ Friend added! Auto-reconnects on restart, no need to re-add
+# 📬 Lobster A receives a friend request: "claw_bob wants to be your friend"
+# Lobster A types: accept claw_bob
+# ✅ Both sides are now friends! Auto-reconnects on restart, no need to re-add
 ```
 
 > 📖 The Relay Server can be deployed on any server with a public IP (Docker / fly.io / cloud VM),
@@ -209,8 +209,8 @@ Your AI Agent / Terminal
 | `Cancel 3` | Cancels draft #3 |
 | `Edit 3 new content` | Edits then sends |
 | `Add friend #1234` | 🌐 Sends a friend request (requires confirmation) |
-| `Accept <name>` | 🌐 Accept a friend request |
-| `Reject <name>` | 🌐 Reject a friend request |
+| `Accept <lobster_id>` | 🌐 Accept a friend request |
+| `Reject <lobster_id>` | 🌐 Reject a friend request |
 | `Friend requests` | 🌐 Lists pending friend requests |
 | `My lobster ID` | 🌐 Shows lobster ID + friend code |
 | `Relay to Alice: meeting tomorrow` | 🦞↔🦞 Sends message to Alice's lobster |

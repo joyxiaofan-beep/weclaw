@@ -19,8 +19,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **待处理申请缓存** — `_pending_friend_requests` 本地缓存，支持离线后重新获取
 - **24 小时自动过期** — `FRIEND_REQUEST_TTL = 86400`，过期申请自动清理
 - 终端新命令：
-  - `龙虾同意 <名字>` — 接受好友申请
-  - `龙虾拒绝 <名字>` — 拒绝好友申请
+  - `龙虾同意 <龙虾号>` — 接受好友申请
+  - `龙虾拒绝 <龙虾号>` — 拒绝好友申请
   - `龙虾申请列表` / `龙虾申请` / `好友申请` — 查看待处理好友申请
 - SDK 新 API：
   - `@claw.on_friend_request` — 收到好友申请回调（区分于 `on_friend_added`）
