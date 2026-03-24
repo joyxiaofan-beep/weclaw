@@ -5,6 +5,7 @@
 """
 
 import os
+import re
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
@@ -79,9 +80,15 @@ class ContactMemory:
 
         logger.info(f"已加载 {len(self._contacts)} 个联系人画像")
 
+    def _safe_filename(self, name: str) -> str:
+        """将联系人名称转为安全的文件名（去掉 / : \\ 等特殊字符）"""
+        safe = re.sub(r'[\\/:*?"<>|]', '_', name)
+        safe = safe.strip('. ')  # 避免以 . 或空格开头/结尾
+        return safe or '_unnamed'
+
     def _save_contact(self, profile: ContactProfile):
         """保存单个联系人画像"""
-        filename = self.data_dir / f"{profile.name}.yaml"
+        filename = self.data_dir / f"{self._safe_filename(profile.name)}.yaml"
         with open(filename, "w", encoding="utf-8") as fp:
             yaml.dump(
                 profile.model_dump(),
@@ -365,7 +372,7 @@ class ContactMemory:
         # 如果改了名字，需要重新映射
         new_name = updates.get("name")
         if new_name and new_name != name:
-            old_file = self.data_dir / f"{name}.yaml"
+            old_file = self.data_dir / f"{self._safe_filename(name)}.yaml"
             if old_file.exists():
                 old_file.unlink()
             del self._contacts[name]
@@ -389,7 +396,7 @@ class ContactMemory:
         if name not in self._contacts:
             return False
 
-        filepath = self.data_dir / f"{name}.yaml"
+        filepath = self.data_dir / f"{self._safe_filename(name)}.yaml"
         if filepath.exists():
             filepath.unlink()
 

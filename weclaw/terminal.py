@@ -95,7 +95,9 @@ def _load_terminal_config() -> dict:
                 full_config = yaml.safe_load(f) or {}
             # 取 ai、behavior、storage、claw2claw 部分
             if "ai" in full_config:
-                config["ai"].update(full_config["ai"])
+                # 过滤掉 None 值，避免 YAML 中的 null 覆盖默认配置
+                ai_conf = {k: v for k, v in full_config["ai"].items() if v is not None}
+                config["ai"].update(ai_conf)
             if "behavior" in full_config:
                 config["behavior"].update(full_config["behavior"])
             if "storage" in full_config:
@@ -790,15 +792,19 @@ class TerminalEngine:
 
         if intent.action == "find_person":
             await self._handle_find_person(intent)
+            return
 
         elif intent.action == "check_reply":
             await self._handle_check_reply(intent)
+            return
 
         elif intent.action == "check_reminders":
             await self._handle_check_reminders()
+            return
 
         elif intent.action == "send_message" and intent.target_name:
             await self._handle_send_message(intent)
+            return
 
         elif intent.action in ("update_contact",):
             # 从指令中学习信息

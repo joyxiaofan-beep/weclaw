@@ -136,7 +136,7 @@ class TerminalChannel(BaseChannel):
 
         try:
             # 异步读取 stdin
-            loop = asyncio.get_event_loop()
+            loop = asyncio.get_running_loop()
             line = await loop.run_in_executor(None, self._read_input)
 
             if line is None:
@@ -144,7 +144,8 @@ class TerminalChannel(BaseChannel):
 
             line = line.strip()
             if not line:
-                return None
+                # 空输入（直接按 Enter）→ 继续等待下一次输入，不退出
+                return await self.receive()
 
             # 退出指令
             if line.lower() in ("quit", "exit", "bye", "退出"):

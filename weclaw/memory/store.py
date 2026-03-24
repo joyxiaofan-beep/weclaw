@@ -30,6 +30,8 @@ class StateStore:
         self.db_path = Path(db_path)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self._local = threading.local()
+        self._all_connections: list[sqlite3.Connection] = []
+        self._conn_lock = threading.Lock()
         self._init_db()
 
     @property

@@ -108,6 +108,27 @@ class Brain:
             conversation_context_fn: 获取对话上下文的回调函数
                                      签名: () -> str，返回格式化的上下文字符串
         """
+        # 检查国产模型是否遗漏了 base_url
+        if base_url is None and api_key:
+            # DeepSeek 等国产模型的 key 格式也是 sk- 开头，无法自动区分
+            # 但如果模型名包含 deepseek/moonshot/qwen 等关键词，提示用户
+            model_lower = model.lower()
+            base_url_hints = {
+                "deepseek": "https://api.deepseek.com/v1",
+                "moonshot": "https://api.moonshot.cn/v1",
+                "qwen": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+                "glm": "https://open.bigmodel.cn/api/paas/v4",
+            }
+            for keyword, hint_url in base_url_hints.items():
+                if keyword in model_lower:
+                    logger.warning(
+                        f"检测到模型名含 '{keyword}' 但未设置 base_url，"
+                        f"将自动使用 {hint_url}。"
+                        f"如需修改，请在 config.yaml 中设置 ai.base_url"
+                    )
+                    base_url = hint_url
+                    break
+
         self.client = OpenAI(api_key=api_key, base_url=base_url)
         self.model = model
         self.memory = contact_memory or ContactMemory()
@@ -567,12 +588,7 @@ score 必须是 0.0 到 1.0 的浮点数。"""
 
         try:
             raw = self._chat(system_prompt, user_msg)
-            # 尝试从 AI 输出中提取 JSON
-            raw = raw.strip()
-            if raw.startswith("```"):
-                # 去掉 markdown 代码块包裹
-                raw = raw.split("\n", 1)[-1].rsplit("```", 1)[0].strip()
-            result = json.loads(raw)
+            result = self._safe_parse_json(raw)
             score = float(result.get("score", 0.0))
             reason = result.get("reason", "")
             score = max(0.0, min(1.0, score))
