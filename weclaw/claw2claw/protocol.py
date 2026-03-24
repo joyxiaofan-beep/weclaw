@@ -29,6 +29,7 @@ Agent Behavior = 龙虾行为规则
 
 import hashlib
 import hmac
+import re
 import time
 import uuid
 from datetime import datetime
@@ -54,7 +55,8 @@ class AgentCard(BaseModel):
     类比：A2A 的 Agent Card，但极度精简。
 
     v2: lobster_id 是持久龙虾号（类似微信号），客户端生成并本地保存，
-    重启不变。格式：lobster_XXXXXXXX（8位hex）。
+    重启不变。格式：claw_<自定义部分>（3-20位，小写字母+数字+下划线）。
+    v0.9: 统一 claw_ 前缀，支持用户自定义。
 
     v0.7 新增（借鉴 Tobira.ai）：
     - handle: 可读别名（如 @alice），类似 Tobira 的人类友好标识
@@ -75,7 +77,7 @@ class AgentCard(BaseModel):
     - page_public: 是否公开个人主页
     """
     # 身份
-    lobster_id: str = Field(default_factory=lambda: f"lobster_{uuid.uuid4().hex[:8]}")
+    lobster_id: str = Field(default_factory=lambda: f"claw_{uuid.uuid4().hex[:8]}")
     lobster_name: str = "🦞 未命名龙虾"
     owner_name: str = "匿名主人"
     handle: str = ""  # 可读别名，如 @alice（v0.7，借鉴 Tobira DIDs 的可读性）
@@ -344,6 +346,10 @@ class PeerInfo(BaseModel):
     - 保留 trusted 属性作为兼容性便捷入口
 
     v0.8: 新增 description（对方自我介绍），丰富通讯录信息
+
+    v1.3: 细粒度权限 + 信任自动衰减/增长
+    - 权限字段: can_view_card, can_message, can_relay, can_introduce
+    - 衰减/增长: 基于 last_interaction 和 interaction_count
     """
     lobster_id: str
     lobster_name: str = ""
@@ -359,6 +365,16 @@ class PeerInfo(BaseModel):
     added_at: str = Field(default_factory=lambda: datetime.now().isoformat())
     introduced_by: Optional[str] = None  # v0.7: 谁引荐的（lobster_id）
 
+    # v1.3: 细粒度权限 — 默认根据 trust_score 自动推导，也可手动覆盖
+    can_view_card: Optional[bool] = None    # 能否查看完整名片（默认 trust >= 10）
+    can_message: Optional[bool] = None      # 能否发送消息（默认 trust >= 70）
+    can_relay: Optional[bool] = None        # 能否通过我中继转发（默认 trust >= 70）
+    can_introduce: Optional[bool] = None    # 能否引荐第三方给我（默认 trust >= 50）
+
+    # v1.3: 信任衰减/增长支持字段
+    last_interaction: Optional[str] = None   # 最后一次交互时间 (ISO format)
+    interaction_count: int = 0               # 累计交互次数
+
     @property
     def trusted(self) -> bool:
         """向后兼容：trust_score >= 70 视为已信任（可传话）"""
@@ -371,6 +387,82 @@ class PeerInfo(BaseModel):
             self.trust_score = 70
         elif not value and self.trust_score >= 70:
             self.trust_score = 0
+
+    def has_permission(self, action: str) -> bool:
+        """
+        检查细粒度权限。
+
+        如果对应权限字段被手动设置（非 None），使用手动值；
+        否则根据 trust_score 自动推导。
+
+        Args:
+            action: "view_card" / "message" / "relay" / "introduce"
+
+        Returns:
+            是否有权限
+        """
+        thresholds = {
+            "view_card": (self.can_view_card, 10),
+            "message": (self.can_message, 70),
+            "relay": (self.can_relay, 70),
+            "introduce": (self.can_introduce, 50),
+        }
+
+        override, min_score = thresholds.get(action, (None, 100))
+        if override is not None:
+            return override
+        return self.trust_score >= min_score
+
+    def record_interaction(self) -> None:
+        """
+        记录一次交互 — 更新 last_interaction 和 interaction_count。
+        用于信任自动增长计算。
+        """
+        self.last_interaction = datetime.now().isoformat()
+        self.interaction_count += 1
+
+    def compute_trust_decay(self, days_inactive: int) -> int:
+        """
+        计算信任衰减值（不直接修改 trust_score）。
+
+        规则:
+        - 30 天无交互: -5
+        - 60 天无交互: -10
+        - 90+ 天无交互: -20
+        - 信任不低于 10（已握手的底线）
+
+        Args:
+            days_inactive: 距最后交互的天数
+
+        Returns:
+            建议的衰减值（负数）
+        """
+        if days_inactive < 30:
+            return 0
+        elif days_inactive < 60:
+            return -5
+        elif days_inactive < 90:
+            return -10
+        else:
+            return -20
+
+    def compute_trust_growth(self) -> int:
+        """
+        基于交互频率计算信任增长值（不直接修改 trust_score）。
+
+        规则:
+        - 每 10 次成功交互: +5（上限 100）
+        - 仅在 trust_score < 100 时有效
+
+        Returns:
+            建议的增长值（正数或 0）
+        """
+        if self.trust_score >= 100:
+            return 0
+        # 每 10 次交互 +5
+        growth_ticks = self.interaction_count // 10
+        max_growth = 100 - self.trust_score
+        return min(growth_ticks * 5, max_growth)
 
 
 class PeerRegistry:
@@ -498,3 +590,58 @@ class PersistentPeerRegistry(PeerRegistry):
             self._store.delete_peer(lobster_id)
             return True
         return False
+
+
+# ──────────────────────────────────────────
+# 龙虾号工具函数 (v0.9)
+# ──────────────────────────────────────────
+
+# 龙虾号自定义部分的正则：3-20 位，小写字母 + 数字 + 下划线
+_LOBSTER_ID_CUSTOM_PATTERN = re.compile(r"^[a-z][a-z0-9_]{2,19}$")
+
+LOBSTER_ID_PREFIX = "claw_"
+
+
+def validate_lobster_id(lobster_id: str) -> tuple[bool, str]:
+    """
+    验证龙虾号格式。
+
+    规则：
+    - 必须以 'claw_' 开头
+    - 自定义部分 3-20 个字符
+    - 只允许小写字母、数字和下划线
+    - 自定义部分必须以字母开头
+
+    Returns:
+        (is_valid, error_message)
+    """
+    if not lobster_id:
+        return False, "龙虾号不能为空"
+
+    if not lobster_id.startswith(LOBSTER_ID_PREFIX):
+        return False, f"龙虾号必须以 '{LOBSTER_ID_PREFIX}' 开头"
+
+    custom_part = lobster_id[len(LOBSTER_ID_PREFIX):]
+
+    if not custom_part:
+        return False, "龙虾号自定义部分不能为空"
+
+    if len(custom_part) < 3:
+        return False, "龙虾号自定义部分至少 3 个字符"
+
+    if len(custom_part) > 20:
+        return False, "龙虾号自定义部分最多 20 个字符"
+
+    if not _LOBSTER_ID_CUSTOM_PATTERN.match(custom_part):
+        return False, "龙虾号只允许小写字母、数字和下划线，且必须以字母开头"
+
+    return True, ""
+
+
+def generate_lobster_id() -> str:
+    """
+    生成一个随机龙虾号（claw_ + 8位hex）。
+
+    用于用户未自定义时的自动生成。
+    """
+    return f"{LOBSTER_ID_PREFIX}{uuid.uuid4().hex[:8]}"

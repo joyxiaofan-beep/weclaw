@@ -5,6 +5,80 @@ All notable changes to WeClaw will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.0] - 2026-03-24
+
+### 🔐 好友安全升级 + 自定义龙虾号
+
+#### Added — 好友申请二次确认机制
+- **好友申请-确认流程** — 加好友不再"一步到位"，需对方确认后才正式成为好友
+  - `friend_request` — 服务端→目标：有人想加你好友
+  - `friend_request_sent` — 服务端→发起方：你的申请已发送
+  - `friend_accept` / `friend_reject` — 目标→服务端：接受/拒绝申请
+  - `friend_request_result` — 服务端→发起方：通知申请结果（接受/拒绝/过期）
+  - `pending_requests` / `pending_requests_list` — 客户端↔服务端：查看待处理申请
+- **待处理申请缓存** — `_pending_friend_requests` 本地缓存，支持离线后重新获取
+- **24 小时自动过期** — `FRIEND_REQUEST_TTL = 86400`，过期申请自动清理
+- 终端新命令：
+  - `龙虾同意 <名字>` — 接受好友申请
+  - `龙虾拒绝 <名字>` — 拒绝好友申请
+  - `龙虾申请列表` / `龙虾申请` / `好友申请` — 查看待处理好友申请
+- SDK 新 API：
+  - `@claw.on_friend_request` — 收到好友申请回调（区分于 `on_friend_added`）
+  - `await claw.accept_friend(request_id)` — 接受好友申请
+  - `await claw.reject_friend(request_id)` — 拒绝好友申请
+  - `await claw.pending_friend_requests()` — 获取待处理申请列表
+
+#### Added — 自定义龙虾号（`claw_` 前缀）
+- **统一 `claw_` 前缀** — 龙虾号格式从 `lobster_XXXXXXXX` 升级为 `claw_<自定义部分>`
+- `validate_lobster_id()` — 龙虾号格式验证函数（3-20 字符，小写字母+数字+下划线，字母开头）
+- `generate_lobster_id()` — 自动生成随机龙虾号（`claw_` + 8 位 hex）
+- **首次启动交互式设定** — 终端模式首次启动时提示用户输入自定义龙虾号，回车跳过则自动生成
+- **向后兼容** — Relay Server 同时接受 `claw_` 和 `lobster_` 前缀
+
+#### Changed
+- `add_friend("#1234")` 的消息从"加好友成功"改为"好友申请已发送，等待确认"
+- `AgentCard.lobster_id` 默认前缀从 `lobster_` 改为 `claw_`
+- SDK `_on_friend_added` 回调语义修正 — 拆分为 `on_friend_request`（收到申请）和 `on_friend_added`（成功添加）
+- 修复 SDK `trust_score=50`（低于通信阈值 70）的 bug → 改为 `trusted=True`（=70）
+
+---
+
+## [1.1.0] - 2026-03-24
+
+### 🏗️ 架构重构 — 从"社交智能代理"到"社交通信协议 SDK"
+
+WeClaw 从"社交智能代理"向"社交通信协议 SDK"全面转型。
+核心理念：WeClaw 是 AI Agent 的通信协议层（"龙虾的微信"），不是 AI Agent 本身。
+WeClaw 负责身份、通讯录、消息传递、NAT 穿越和信任验证；AI 智能由外部实现。
+
+### Added
+- **`weclaw/sdk.py`** — 全新 SDK 公共 API 层（Phase 1）
+  - `WeClaw` 类：统一入口，封装身份/通讯录/消息/加好友
+  - `await claw.send(to, message)` — 向龙虾发消息
+  - `claw.contacts()` — 获取通讯录
+  - `await claw.add_friend("#1234")` — 通过加好友码加好友
+  - `claw.my_card()` — 获取我的名片
+  - `@claw.on_message` — 注册消息回调（装饰器模式）
+  - `@claw.on_friend_request` — 注册好友请求回调
+  - `async with WeClaw() as claw:` — 上下文管理器支持
+  - 身份自动持久化（lobster_id 重启不变）
+  - 零 Brain 依赖 — AI 逻辑完全由外部回调控制
+- **`tests/test_sdk.py`** — SDK 基础测试
+- `from weclaw import WeClaw` — 顶层导出
+
+### Changed
+- `__init__.py` 文案从"社交智能代理"改为"社交通信协议 SDK"
+- 版本号 1.0.0 → 1.1.0
+
+### Removed — AI 解耦（Phase 2-6）
+- **Brain 类移除（Phase 2）** — `brain/core.py` 精简为弃用存根，仅保留数据模型（`MessageIntent`、`ReplyDigest` 等）和工具函数（`mask_api_key`）
+- **Terminal 解耦（Phase 2）** — `terminal.py` 12+ 处 Brain 耦合点全部移除，AI 意图解析替换为正则命令匹配
+- **ContactMemory 简化（Phase 3）** — 移除 `ai_summary` 字段、`generate_ai_summary()`、`update_ai_summary()` 方法
+- **C2C Handler 解耦（Phase 5）** — `handler.py` 移除 `ai_digest_fn` 参数，查询消息不再自动 AI 回答，统一通知主人处理
+- **依赖瘦身（Phase 6）** — `openai` 和 `tenacity` 从核心依赖移至可选 `[ai]` extras（`pip install weclaw[ai]`）
+
+---
+
 ## [1.0.0] - 2026-03-24
 
 ### 🎉 首个正式发布版本
@@ -51,7 +125,7 @@ WeClaw 1.0.0 汇集了 v0.2 ~ v0.8 的所有功能，正式面向公众发布。
 
 ### Added
 - 持久龙虾号 + 好友系统 (Relay v2 协议)
-- 永久龙虾号 `lobster_XXXXXXXX`（首次启动自动生成，重启不变）
+- 永久龙虾号 `lobster_XXXXXXXX`（首次启动自动生成，重启不变；v1.2 起升级为 `claw_` 前缀）
 - 一次性加好友码 `#XXXX`（10 分钟有效）
 - 好友列表 SQLite 持久化
 - Relay Server v2（零存储，只转发）

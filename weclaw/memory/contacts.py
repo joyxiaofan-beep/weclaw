@@ -46,9 +46,6 @@ class ContactProfile(BaseModel):
     last_contact: Optional[str] = None    # 最近接触时间
     total_interactions: int = 0           # 总交互次数
 
-    # AI 生成的综合画像摘要（定期更新）
-    ai_summary: Optional[str] = None
-
 
 class ContactMemory:
     """
@@ -229,67 +226,11 @@ class ContactMemory:
         return None
 
     # ──────────────────────────────────────────
-    # AI Summary 管理
-    # ──────────────────────────────────────────
-
-    def update_ai_summary(self, name: str, summary: str) -> bool:
-        """
-        更新联系人的 AI 综合画像摘要
-
-        Args:
-            name: 联系人名称
-            summary: AI 生成的画像摘要
-
-        Returns:
-            是否成功更新
-        """
-        profile = self.get_contact(name)
-        if not profile:
-            return False
-
-        profile.ai_summary = summary
-        self._save_contact(profile)
-        logger.info(f"AI Summary 已更新: {name}")
-        return True
-
-    def should_refresh_summary(self, name: str, interval: int = 10, min_interactions: int = 3) -> bool:
-        """
-        判断是否应该刷新某联系人的 AI Summary
-
-        触发条件（满足任一）：
-        1. 从未生成过 + 交互次数 >= min_interactions
-        2. 交互次数是 interval 的整数倍（每 N 次交互刷新一次）
-
-        Args:
-            name: 联系人名称
-            interval: 每隔多少次交互刷新一次
-            min_interactions: 首次生成的最低交互次数
-
-        Returns:
-            是否应该刷新
-        """
-        profile = self.get_contact(name)
-        if not profile:
-            return False
-
-        total = profile.total_interactions
-
-        # 从未生成过，且达到最低交互阈值
-        if profile.ai_summary is None and total >= min_interactions:
-            return True
-
-        # 已有 Summary，检查是否到了刷新周期
-        if profile.ai_summary is not None and total > 0 and total % interval == 0:
-            return True
-
-        return False
-
-    # ──────────────────────────────────────────
-    # 画像输出（给 AI 看的）
+    # 画像输出
     # ──────────────────────────────────────────
 
     def get_contact_brief(self, name: str) -> str:
-        """获取联系人的简要画像描述（用于注入 AI prompt）"""
+        """获取联系人的简要画像描述"""
         profile = self.get_contact(name)
         if not profile:
             return f"我不认识 {name}，这是一个新联系人。"
@@ -308,8 +249,6 @@ class ContactMemory:
             lines.append(f"沟通特征: {', '.join(profile.traits)}")
         if profile.notes:
             lines.append(f"备注: {'; '.join(profile.notes)}")
-        if profile.ai_summary:
-            lines.append(f"综合印象: {profile.ai_summary}")
 
         lines.append(f"总共交互 {profile.total_interactions} 次")
         if profile.last_contact:
@@ -326,7 +265,7 @@ class ContactMemory:
         return "\n".join(lines)
 
     def get_all_contacts_brief(self) -> str:
-        """获取所有联系人的概要（用于 AI 决策）"""
+        """获取所有联系人的概要"""
         if not self._contacts:
             return "通讯录为空，还没有认识任何人。"
 
@@ -362,7 +301,7 @@ class ContactMemory:
         # 允许更新的字段
         editable_fields = {
             "real_name", "department", "title", "external_id",
-            "expertise", "traits", "notes", "ai_summary",
+            "expertise", "traits", "notes",
         }
 
         for key, value in updates.items():

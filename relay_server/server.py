@@ -5,7 +5,7 @@ WeClaw Relay Server — 龙虾中继服务器 v2
 
 核心理念：
 - **平台成本最低** — Relay 只做路由和转发，不存储消息，不调用 AI
-- **持久身份（龙虾号）** — 每只龙虾有唯一的龙虾号（如 lobster_a3f8），重启不变
+- **持久身份（龙虾号）** — 每只龙虾有唯一的龙虾号（如 claw_alice），重启不变
 - **临时配对码仅用于加好友** — 像微信"面对面加好友"，加完一次后续靠龙虾号直连
 - **好友关系由客户端维护** — Relay 不存储好友关系，只在线时路由
 
@@ -34,6 +34,7 @@ import os
 import random
 import string
 import time
+import uuid
 from dataclasses import dataclass, field
 from typing import Optional
 
@@ -61,6 +62,9 @@ MAX_LOBSTERS = int(os.environ.get("RELAY_MAX_LOBSTERS", "2000"))
 
 # 临时配对码有效期（秒）— 仅加好友用，加完即弃
 PAIR_CODE_TTL = 10 * 60  # 10 分钟（更短，因为只用一次）
+
+# 好友申请有效期（秒）— 超时自动拒绝
+FRIEND_REQUEST_TTL = 24 * 60 * 60  # 24 小时
 
 # 心跳间隔
 HEARTBEAT_INTERVAL = 30  # 秒
@@ -113,6 +117,8 @@ class RelayServer:
         self._pair_codes: dict[str, tuple[str, float]] = {}
         # ws_id -> lobster_id（反向索引）
         self._ws_to_id: dict[int, str] = {}
+        # 待审批好友申请: request_id -> {requester_id, target_id, timestamp, requester_info}
+        self._pending_friend_requests: dict[str, dict] = {}
 
     def _generate_pair_code(self) -> str:
         """
@@ -151,6 +157,32 @@ class RelayServer:
             for lid in stale:
                 logger.info(f"🧹 清理超时龙虾: {lid}")
                 await self._remove_lobster(lid)
+
+    async def _cleanup_expired_requests(self):
+        """定期清理过期的好友申请"""
+        while True:
+            await asyncio.sleep(300)  # 每 5 分钟检查一次
+            now = time.time()
+            expired = [
+                req_id for req_id, req in self._pending_friend_requests.items()
+                if now - req["timestamp"] > FRIEND_REQUEST_TTL
+            ]
+            for req_id in expired:
+                req = self._pending_friend_requests.pop(req_id)
+                # 通知请求方申请已过期
+                requester = self._online.get(req["requester_id"])
+                if requester:
+                    await self._send_to(requester.ws, {
+                        "type": "friend_request_result",
+                        "data": {
+                            "success": False,
+                            "lobster_id": req["target_id"],
+                            "owner_name": req["target_info"]["owner_name"],
+                            "message": f"⏰ 向 {req['target_info']['owner_name']} 的好友申请已过期（超过24小时未处理）",
+                        }
+                    })
+            if expired:
+                logger.info(f"🧹 清理了 {len(expired)} 条过期好友申请")
 
     async def _remove_lobster(self, lobster_id: str):
         """移除一只龙虾（下线）"""
@@ -197,10 +229,10 @@ class RelayServer:
         龙虾上线注册
 
         data: {
-            lobster_id: "lobster_a3f8",    # 持久龙虾号（客户端生成）
+            lobster_id: "claw_alice",      # 持久龙虾号（客户端生成，claw_ 前缀）
             lobster_name: "🦞 小虾",
             owner_name: "Alice",
-            friends: ["lobster_b2c1", ...]  # 已有好友列表（客户端上报）
+            friends: ["claw_bob", ...]  # 已有好友列表（客户端上报）
         }
         返回: {pair_code, lobster_id, online_friends: [...]}
         """
@@ -210,6 +242,10 @@ class RelayServer:
         lobster_id = data.get("lobster_id", "")
         if not lobster_id:
             return {"type": "error", "data": {"message": "缺少 lobster_id"}}
+
+        # v0.9: 龙虾号格式校验（兼容旧格式 lobster_ 前缀）
+        if not (lobster_id.startswith("claw_") or lobster_id.startswith("lobster_")):
+            return {"type": "error", "data": {"message": "龙虾号格式无效，需以 claw_ 开头"}}
 
         # 重连处理
         if lobster_id in self._online:
@@ -284,10 +320,10 @@ class RelayServer:
 
     async def _handle_pair(self, ws, data: dict) -> dict:
         """
-        临时配对码加好友（仅首次，加完双方本地保存好友关系）
+        通过临时配对码发送好友申请（需对方确认后才正式成为好友）
 
         data: {pair_code: "#1234"}
-        返回: 双方互相通知
+        流程: 请求方输入配对码 → 服务器发 friend_request 给目标 → 等目标确认/拒绝
         """
         pair_code = data.get("pair_code", "").strip()
 
@@ -326,37 +362,225 @@ class RelayServer:
                 "data": {"message": f"你们已经是好友了！直接用「龙虾传话 {target.owner_name} 内容」传话吧"}
             }
 
-        # 双向加好友（运行时状态）
-        requester.friends.add(target_id)
-        target.friends.add(requester_id)
+        # 检查是否已有待处理的申请（避免重复发送）
+        for req in self._pending_friend_requests.values():
+            if req["requester_id"] == requester_id and req["target_id"] == target_id:
+                return {
+                    "type": "pair_failed",
+                    "data": {"message": f"你已经向 {target.owner_name} 发送过好友申请了，请等待对方确认"}
+                }
+
+        # 生成好友申请 ID
+        request_id = uuid.uuid4().hex[:12]
+
+        # 存入待审批队列
+        self._pending_friend_requests[request_id] = {
+            "requester_id": requester_id,
+            "target_id": target_id,
+            "timestamp": time.time(),
+            "requester_info": {
+                "lobster_id": requester.lobster_id,
+                "lobster_name": requester.lobster_name,
+                "owner_name": requester.owner_name,
+            },
+            "target_info": {
+                "lobster_id": target.lobster_id,
+                "lobster_name": target.lobster_name,
+                "owner_name": target.owner_name,
+            },
+        }
 
         # 用完即弃：删除加好友码（一次性）
         del self._pair_codes[pair_code]
 
         logger.info(
-            f"🦞🤝🦞 加好友成功! {requester.lobster_name}[{requester_id}] "
-            f"↔ {target.lobster_name}[{target_id}]"
+            f"🦞📬 好友申请! {requester.lobster_name}[{requester_id}] "
+            f"→ {target.lobster_name}[{target_id}] [申请ID: {request_id}]"
         )
 
-        # 通知目标（被加的一方）
+        # 通知目标龙虾：收到好友申请（需确认）
         await self._send_to(target.ws, {
-            "type": "friend_added",
+            "type": "friend_request",
             "data": {
+                "request_id": request_id,
                 "lobster_id": requester.lobster_id,
                 "lobster_name": requester.lobster_name,
                 "owner_name": requester.owner_name,
-                "message": f"{requester.owner_name} 加你为好友了！",
+                "message": f"📬 {requester.owner_name} 的龙虾 {requester.lobster_name} 想加你为好友！",
             }
         })
 
-        # 返回给请求方
+        # 返回给请求方：申请已发送，等待确认
         return {
-            "type": "friend_added",
+            "type": "friend_request_sent",
             "data": {
+                "request_id": request_id,
                 "lobster_id": target.lobster_id,
                 "lobster_name": target.lobster_name,
                 "owner_name": target.owner_name,
-                "message": f"已和 {target.owner_name} 成为好友！",
+                "message": f"已向 {target.owner_name} 发送好友申请，等待对方确认...",
+            }
+        }
+
+    async def _handle_friend_accept(self, ws, data: dict) -> dict:
+        """
+        接受好友申请 → 双向加好友
+
+        data: {request_id: "abc123def456"}
+        """
+        request_id = data.get("request_id", "")
+
+        # 找到操作人
+        accepter_id = self._ws_to_id.get(id(ws))
+        if not accepter_id or accepter_id not in self._online:
+            return {"type": "error", "data": {"message": "请先注册"}}
+
+        # 查找申请
+        request = self._pending_friend_requests.get(request_id)
+        if not request:
+            return {
+                "type": "friend_request_result",
+                "data": {"success": False, "message": "好友申请不存在或已过期"}
+            }
+
+        # 鉴权：只有目标方能接受
+        if request["target_id"] != accepter_id:
+            return {
+                "type": "friend_request_result",
+                "data": {"success": False, "message": "无权操作此好友申请"}
+            }
+
+        requester_id = request["requester_id"]
+        requester = self._online.get(requester_id)
+        accepter = self._online[accepter_id]
+
+        # 双向加好友（运行时状态）
+        accepter.friends.add(requester_id)
+        if requester:
+            requester.friends.add(accepter_id)
+
+        # 删除已处理的申请
+        del self._pending_friend_requests[request_id]
+
+        logger.info(
+            f"🦞🤝🦞 好友申请通过! {request['requester_info']['lobster_name']}[{requester_id}] "
+            f"↔ {accepter.lobster_name}[{accepter_id}]"
+        )
+
+        # 通知请求方：好友申请被接受
+        if requester:
+            await self._send_to(requester.ws, {
+                "type": "friend_added",
+                "data": {
+                    "lobster_id": accepter.lobster_id,
+                    "lobster_name": accepter.lobster_name,
+                    "owner_name": accepter.owner_name,
+                    "message": f"🎉 {accepter.owner_name} 接受了你的好友申请！",
+                }
+            })
+
+        # 返回给接受方：确认好友添加成功
+        return {
+            "type": "friend_added",
+            "data": {
+                "lobster_id": request["requester_info"]["lobster_id"],
+                "lobster_name": request["requester_info"]["lobster_name"],
+                "owner_name": request["requester_info"]["owner_name"],
+                "message": f"已和 {request['requester_info']['owner_name']} 成为好友！",
+            }
+        }
+
+    async def _handle_friend_reject(self, ws, data: dict) -> dict:
+        """
+        拒绝好友申请
+
+        data: {request_id: "abc123def456"}
+        """
+        request_id = data.get("request_id", "")
+
+        # 找到操作人
+        rejecter_id = self._ws_to_id.get(id(ws))
+        if not rejecter_id or rejecter_id not in self._online:
+            return {"type": "error", "data": {"message": "请先注册"}}
+
+        # 查找申请
+        request = self._pending_friend_requests.get(request_id)
+        if not request:
+            return {
+                "type": "friend_request_result",
+                "data": {"success": False, "message": "好友申请不存在或已过期"}
+            }
+
+        # 鉴权：只有目标方能拒绝
+        if request["target_id"] != rejecter_id:
+            return {
+                "type": "friend_request_result",
+                "data": {"success": False, "message": "无权操作此好友申请"}
+            }
+
+        requester_id = request["requester_id"]
+        requester = self._online.get(requester_id)
+
+        # 删除已处理的申请
+        del self._pending_friend_requests[request_id]
+
+        logger.info(
+            f"🦞❌ 好友申请被拒! {request['requester_info']['lobster_name']}[{requester_id}] "
+            f"→ {self._online[rejecter_id].lobster_name}[{rejecter_id}]"
+        )
+
+        # 通知请求方：好友申请被拒绝
+        if requester:
+            await self._send_to(requester.ws, {
+                "type": "friend_request_result",
+                "data": {
+                    "success": False,
+                    "lobster_id": rejecter_id,
+                    "owner_name": self._online[rejecter_id].owner_name,
+                    "message": f"😞 {self._online[rejecter_id].owner_name} 拒绝了你的好友申请",
+                }
+            })
+
+        # 返回给拒绝方
+        return {
+            "type": "friend_request_result",
+            "data": {
+                "success": True,
+                "message": f"已拒绝 {request['requester_info']['owner_name']} 的好友申请",
+            }
+        }
+
+    async def _handle_pending_requests(self, ws, data: dict) -> dict:
+        """
+        查看待处理的好友申请列表
+
+        data: {} (无需参数)
+        """
+        lobster_id = self._ws_to_id.get(id(ws))
+        if not lobster_id or lobster_id not in self._online:
+            return {"type": "error", "data": {"message": "请先注册"}}
+
+        now = time.time()
+        pending = []
+        for req_id, req in self._pending_friend_requests.items():
+            if req["target_id"] == lobster_id:
+                # 跳过已过期的
+                if now - req["timestamp"] > FRIEND_REQUEST_TTL:
+                    continue
+                pending.append({
+                    "request_id": req_id,
+                    "lobster_id": req["requester_info"]["lobster_id"],
+                    "lobster_name": req["requester_info"]["lobster_name"],
+                    "owner_name": req["requester_info"]["owner_name"],
+                    "time_ago": int(now - req["timestamp"]),  # 多少秒前
+                })
+
+        return {
+            "type": "pending_requests_list",
+            "data": {
+                "requests": pending,
+                "count": len(pending),
+                "message": f"有 {len(pending)} 条待处理的好友申请",
             }
         }
 
@@ -666,6 +890,9 @@ class RelayServer:
                     "list_friends": self._handle_list_friends,
                     "discover": self._handle_discover,       # v0.7: 龙虾发现
                     "introduce": self._handle_introduce,     # v0.7: 好友引荐
+                    "friend_accept": self._handle_friend_accept,       # v0.9: 接受好友申请
+                    "friend_reject": self._handle_friend_reject,       # v0.9: 拒绝好友申请
+                    "pending_requests": self._handle_pending_requests,  # v0.9: 查看待处理申请
                 }.get(msg_type)
 
                 if handler:
@@ -689,14 +916,16 @@ class RelayServer:
 
     async def run(self):
         """启动 Relay Server"""
-        logger.info("🦞🌐 WeClaw Relay Server v2.1 启动中...")
+        logger.info("🦞🌐 WeClaw Relay Server v2.2 启动中...")
         logger.info(f"   📡 地址: ws://{RELAY_HOST}:{RELAY_PORT}")
         logger.info(f"   🦞 最大在线: {MAX_LOBSTERS}")
         logger.info(f"   🔍 发现协议: 已启用 (v0.7)")
+        logger.info(f"   🤝 好友确认: 已启用 (v0.9)")
         logger.info(f"   💰 平台成本: 0（只做路由，AI 走用户自己的 Key）")
 
         asyncio.create_task(self._cleanup_expired_codes())
         asyncio.create_task(self._cleanup_stale_connections())
+        asyncio.create_task(self._cleanup_expired_requests())
 
         async with serve(
             self.handle_connection,

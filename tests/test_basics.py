@@ -10,12 +10,14 @@ class TestImports:
 
     def test_import_version(self):
         from weclaw import __version__
-        assert __version__ == "1.0.0"
+        assert __version__ == "1.2.0"
 
-    def test_import_brain(self):
-        from weclaw.brain.core import Brain, MessageIntent, GeneratedMessage, ReplyDigest
-        assert Brain is not None
+    def test_import_brain_stub(self):
+        """brain/core.py 保留的向后兼容存根应可正常导入"""
+        from weclaw.brain.core import MessageIntent, ReplyDigest, mask_api_key
         assert MessageIntent is not None
+        assert ReplyDigest is not None
+        assert callable(mask_api_key)
 
     def test_import_contacts(self):
         from weclaw.memory.contacts import ContactMemory
@@ -72,27 +74,27 @@ class TestAgentCard:
     def test_create_agent_card(self):
         from weclaw.claw2claw.protocol import AgentCard, AgentCapability
         card = AgentCard(
-            lobster_id="lobster_test123",
+            lobster_id="claw_test123",
             lobster_name="🦞 测试龙虾",
             owner_name="测试者",
             capabilities=[
                 AgentCapability(name="relay_message", description="代主人传话")
             ],
         )
-        assert card.lobster_id == "lobster_test123"
+        assert card.lobster_id == "claw_test123"
         assert card.owner_name == "测试者"
         assert len(card.capabilities) == 1
 
     def test_agent_card_to_dict(self):
         from weclaw.claw2claw.protocol import AgentCard
         card = AgentCard(
-            lobster_id="lobster_abc",
+            lobster_id="claw_abc",
             lobster_name="🦞 ABC",
             owner_name="ABC",
         )
         d = card.model_dump()
         assert "lobster_id" in d
-        assert d["lobster_id"] == "lobster_abc"
+        assert d["lobster_id"] == "claw_abc"
 
 
 class TestC2CMessage:
@@ -101,11 +103,11 @@ class TestC2CMessage:
     def test_create_message(self):
         from weclaw.claw2claw.protocol import C2CMessage
         msg = C2CMessage(
-            from_lobster_id="lobster_a",
+            from_lobster_id="claw_aaa",
             msg_type="message",
             content="你好！",
         )
-        assert msg.from_lobster_id == "lobster_a"
+        assert msg.from_lobster_id == "claw_aaa"
         assert msg.msg_type == "message"
         assert msg.content == "你好！"
 

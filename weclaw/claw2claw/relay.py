@@ -21,7 +21,7 @@ v2 核心变化（对齐 Relay Server v2 协议）：
 用法（对终端用户透明）：
     龙虾启动 → 自动连 relay → 打印加好友码
     龙虾加好友 #1234 → 一次性加好友
-    龙虾传话 老王 xxx → 按龙虾号通过 relay 转发
+    龙虾传话 Alice xxx → 按龙虾号通过 relay 转发
 """
 
 import asyncio
@@ -61,6 +61,7 @@ class RelayClient:
         relay_url: str = DEFAULT_RELAY_URL,
         on_message: Optional[Callable[[C2CMessage], Awaitable[Optional[C2CMessage]]]] = None,
         on_friend_added: Optional[Callable[[dict], Awaitable[None]]] = None,
+        on_friend_request: Optional[Callable[[dict], Awaitable[None]]] = None,   # v0.9: 好友申请
         on_friend_online: Optional[Callable[[dict], Awaitable[None]]] = None,
         on_friend_offline: Optional[Callable[[dict], Awaitable[None]]] = None,
         on_discover_result: Optional[Callable[[dict], Awaitable[None]]] = None,   # v0.7
@@ -73,6 +74,7 @@ class RelayClient:
             relay_url: Relay Server 的 WebSocket 地址
             on_message: 收到消息的回调 (C2CMessage) -> Optional[C2CMessage 回复]
             on_friend_added: 加好友成功的回调 (friend_info_dict) -> None
+            on_friend_request: v0.9 收到好友申请的回调 (request_data) -> None
             on_friend_online: 好友上线的回调 (friend_info_dict) -> None
             on_friend_offline: 好友下线的回调 (friend_info_dict) -> None
             on_discover_result: v0.7 发现结果回调 (discover_data) -> None
@@ -84,6 +86,7 @@ class RelayClient:
 
         self._on_message = on_message
         self._on_friend_added = on_friend_added
+        self._on_friend_request = on_friend_request     # v0.9: 好友申请回调
         self._on_friend_online = on_friend_online
         self._on_friend_offline = on_friend_offline
         self._on_discover_result = on_discover_result   # v0.7
@@ -96,6 +99,9 @@ class RelayClient:
 
         # 消息等待队列（用于同步请求-响应模式）
         self._pending_responses: dict[str, asyncio.Future] = {}
+
+        # v0.9: 本地缓存的待处理好友申请 (request_id -> request_data)
+        self._pending_friend_requests: dict[str, dict] = {}
 
         # 重连配置
         self._reconnect_delay = 2  # 初始重连延迟（秒）
@@ -252,19 +258,25 @@ class RelayClient:
 
     async def add_friend_by_code(self, pair_code: str) -> Optional[dict]:
         """
-        通过临时加好友码添加好友（v2 协议，替代旧的 pair_with_code）
+        通过临时加好友码发送好友申请（v0.9 二次确认机制）
+
+        流程: 输入配对码 → 服务器发申请给对方 → 等对方确认/拒绝
+        返回: {request_id, lobster_id, owner_name, message} 或 None（失败）
+
+        注意: 返回成功仅表示"申请已发送"，不表示已成为好友。
+              真正成为好友会通过 on_friend_added 回调通知。
 
         Args:
             pair_code: 对方的加好友码 (#XXXX)
 
         Returns:
-            好友信息 dict，失败返回 None
+            申请发送结果 dict，失败返回 None
         """
         if not self._connected:
             logger.error("未连接到 Relay")
             return None
 
-        # 创建一个 Future 等待加好友结果
+        # 创建一个 Future 等待申请发送结果
         pair_future = asyncio.get_running_loop().create_future()
         self._pending_responses["_pair_result"] = pair_future
 
@@ -283,10 +295,84 @@ class RelayClient:
             result = await asyncio.wait_for(pair_future, timeout=15)
             return result
         except asyncio.TimeoutError:
-            logger.error("加好友超时")
+            logger.error("发送好友申请超时")
             return None
         finally:
             self._pending_responses.pop("_pair_result", None)
+
+    async def accept_friend(self, request_id: str) -> bool:
+        """
+        接受好友申请（v0.9）
+
+        Args:
+            request_id: 好友申请 ID
+
+        Returns:
+            是否成功发送接受指令
+        """
+        if not self._connected:
+            logger.error("未连接到 Relay")
+            return False
+
+        msg = {
+            "type": "friend_accept",
+            "data": {"request_id": request_id}
+        }
+        await self._send(msg)
+
+        # 从本地缓存删除
+        self._pending_friend_requests.pop(request_id, None)
+        return True
+
+    async def reject_friend(self, request_id: str) -> bool:
+        """
+        拒绝好友申请（v0.9）
+
+        Args:
+            request_id: 好友申请 ID
+
+        Returns:
+            是否成功发送拒绝指令
+        """
+        if not self._connected:
+            logger.error("未连接到 Relay")
+            return False
+
+        msg = {
+            "type": "friend_reject",
+            "data": {"request_id": request_id}
+        }
+        await self._send(msg)
+
+        # 从本地缓存删除
+        self._pending_friend_requests.pop(request_id, None)
+        return True
+
+    async def list_pending_requests(self) -> Optional[list]:
+        """
+        查询待处理的好友申请列表（v0.9）
+
+        Returns:
+            申请列表 [{request_id, lobster_id, owner_name, ...}, ...] 或 None
+        """
+        if not self._connected:
+            logger.error("未连接到 Relay")
+            return None
+
+        # 创建 Future 等待结果
+        fut = asyncio.get_running_loop().create_future()
+        self._pending_responses["_pending_requests_result"] = fut
+
+        await self._send({"type": "pending_requests", "data": {}})
+
+        try:
+            result = await asyncio.wait_for(fut, timeout=10)
+            return result
+        except asyncio.TimeoutError:
+            logger.error("查询待处理申请超时")
+            return None
+        finally:
+            self._pending_responses.pop("_pending_requests_result", None)
 
     # 兼容旧方法名
     async def pair_with_code(self, code: str) -> Optional[dict]:
@@ -412,6 +498,36 @@ class RelayClient:
             # 加好友成功（v2，替代旧的 paired）
             await self._handle_friend_added(msg_data)
 
+        elif msg_type == "friend_request":
+            # v0.9: 收到好友申请（需确认/拒绝）
+            await self._handle_friend_request(msg_data)
+
+        elif msg_type == "friend_request_sent":
+            # v0.9: 好友申请已发送（回复给请求方）
+            pair_future = self._pending_responses.pop("_pair_result", None)
+            if pair_future and not pair_future.done():
+                pair_future.set_result(msg_data)
+            logger.info(f"📬 {msg_data.get('message', '好友申请已发送')}")
+
+        elif msg_type == "friend_request_result":
+            # v0.9: 好友申请结果（被拒绝/过期/操作确认）
+            success = msg_data.get("success", False)
+            message = msg_data.get("message", "")
+            if success:
+                logger.info(f"✅ {message}")
+            else:
+                logger.warning(f"❌ {message}")
+            # 如果有等待中的 pair_future（申请被拒时也要通知）
+            pair_future = self._pending_responses.pop("_pair_result", None)
+            if pair_future and not pair_future.done():
+                pair_future.set_result(None)
+
+        elif msg_type == "pending_requests_list":
+            # v0.9: 待处理好友申请列表
+            fut = self._pending_responses.pop("_pending_requests_result", None)
+            if fut and not fut.done():
+                fut.set_result(msg_data.get("requests", []))
+
         elif msg_type == "pair_failed":
             # 加好友失败
             pair_future = self._pending_responses.pop("_pair_result", None)
@@ -473,6 +589,25 @@ class RelayClient:
 
         elif msg_type == "error":
             logger.error(f"Relay 错误: {msg_data.get('message', '')}")
+
+    async def _handle_friend_request(self, data: dict):
+        """
+        v0.9: 处理收到的好友申请（需用户确认）
+
+        data: {request_id, lobster_id, lobster_name, owner_name, message}
+        """
+        request_id = data.get("request_id", "")
+        owner_name = data.get("owner_name", "未知")
+        lobster_name = data.get("lobster_name", "")
+
+        logger.info(f"📬 收到好友申请! {owner_name} 的 {lobster_name} 想加你为好友")
+
+        # 缓存到本地
+        self._pending_friend_requests[request_id] = data
+
+        # 回调通知上层（Terminal/SDK）
+        if self._on_friend_request:
+            await self._on_friend_request(data)
 
     async def _handle_friend_added(self, data: dict):
         """

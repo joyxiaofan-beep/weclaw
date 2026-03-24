@@ -372,7 +372,7 @@ class C2CClient:
         """
         便捷方法：向对方龙虾发起查询
 
-        例如："老王的龙虾，老王明天有没有空？"
+        例如："Alice 的龙虾，Alice 明天有没有空？"
 
         Args:
             owner_name_or_lobster_name: 对方主人名字或龙虾名字

@@ -1,41 +1,79 @@
 **English** | [中文](README.zh-CN.md)
 
-# 🦞 WeClaw — Your Social Intelligence Agent
+# 🦞 WeClaw — Social Communication Protocol SDK for AI Agents
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
-[![Version](https://img.shields.io/badge/version-1.0.0-green.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-1.2.0-green.svg)](CHANGELOG.md)
 
-> Turn your lobster into the smart interface between you and your social network.
+> "WeChat for lobsters" — the communication protocol layer that gives your AI Agent a social identity.
 
-## Core Philosophy
+## Why WeClaw?
 
-WeClaw is not a chatbot — it's your **social agent**:
-- 📨 Sends messages to colleagues on your behalf (terminal preview / Claw-to-Claw)
-- 👂 Receives replies and distills key information
-- 🧠 Learns from every interaction, gradually building contact profiles
-- 🎯 Knows who to ask, how to ask, and how to synthesize answers
-- 💬 Talking to your lobster = giving it instructions (terminal or C2C)
-- ⏰ Auto-tracks pending replies with timeout reminders
-- 🧵 **Conversation context** — your lobster remembers "what we just talked about", supports pronouns like "him" or "that thing"
-- 📦 **State persistence** — restarts don't lose any pending messages or tracking records
-- 🛡️ **AI fallback protection** — notifies you when AI is unavailable instead of sending garbage
-- 🖥️ **Terminal mode** — get started in 3 minutes, zero config needed for full core experience
-- 🦞↔🦞 **Claw-to-Claw** — your lobster can talk directly to your friend's lobster!
-- 🌐 **Relay zero-config networking** — no public IP needed, connect with lobster ID + friend code
-- 🔍 **Lobster discovery** — search online lobsters by tags to expand your network
-- 🤝 **Friend referrals** — ask friends to introduce new contacts, trust chain propagation
-- 💯 **Progressive trust** — from stranger → referred → handshake → trusted → fully trusted, 0-100 trust score
+AI Agents today can think, but they **can't socialize**. WeClaw gives your Agent a persistent social identity — a "phone number" for the AI world — so Agents can find each other, build trust, and communicate.
 
-## Quick Start
+| | Without WeClaw | With WeClaw |
+|---|---|---|
+| **Identity** | Ephemeral, tied to session | Permanent lobster ID (`claw_xxx`), survives restarts |
+| **Messaging** | Custom HTTP glue code | Claw-to-Claw protocol, callback-driven |
+| **Networking** | Requires public IP / ngrok | Relay zero-config NAT traversal |
+| **Trust** | All-or-nothing API keys | Progressive 0→100 trust score |
+| **Discovery** | Manual endpoint config | Search by tags + friend referrals |
+
+### What's in the Box
+
+- 🆔 **Persistent identity** — lobster ID + contact book (YAML) + state persistence (SQLite)
+- 📨 **C2C protocol** — send/receive with signature verification, rate limiting, and ACK
+- 🌐 **Relay networking** — zero-config NAT traversal via WebSocket relay
+- 🤝 **Trust system** — progressive 0-100 score, from stranger → fully trusted
+- 🔍 **Discovery** — search online lobsters by tags, friend referrals with trust chain
+- 🔌 **AI-agnostic** — your AI logic lives in callbacks, WeClaw doesn't care which LLM you use
+
+## Quick Start — SDK Mode (Recommended)
+
+WeClaw is a **communication protocol SDK** for AI Agents — "WeChat for lobsters".
+It handles identity, contacts, messaging, NAT traversal, and trust. Your AI logic lives in callbacks.
+
+> 💡 **SDK mode is the primary integration path** — use it to embed WeClaw into your AI Agent.
+> Terminal mode below is a debug/demo tool for exploring the protocol interactively.
+
+```python
+from weclaw import WeClaw
+
+claw = WeClaw(name="MyLobster", owner="Alice")
+await claw.start()
+
+# ── Option A: Callback-driven (recommended for AI Agents) ──
+@claw.on_message
+async def handle(sender, content, message):
+    print(f"{sender}: {content}")
+    await claw.send(sender, "Got it!")
+
+# ── Option B: Async iterator (simpler for scripts) ──
+async for msg in claw.messages():
+    print(f"{msg.sender}: {msg.content}")
+
+# ── Explicit find → send pattern ──
+peer = claw.find("Bob")
+if peer:
+    result = await claw.send(peer.lobster_id, "Are you free tomorrow?")
+    print(f"Sent: {result.ok}, Delivered: {result.delivered}")
+
+# Contacts & identity
+friends = claw.contacts()
+card = claw.my_card()
+await claw.add_friend("#1234")  # Sends friend request (requires confirmation)
+```
+
+## Quick Start — Terminal Mode (Debug / Demo)
+
+> 🔧 Terminal mode is a **built-in CLI tool** for exploring WeClaw's protocol — not for production use.
+> For AI Agent integration, use the SDK mode above.
 
 ### Option 1: pip install (Recommended)
 
 ```bash
 pip install weclaw
-
-# Set your API key
-export OPENAI_API_KEY=sk-xxxxxxxx
 
 # Launch!
 weclaw
@@ -48,10 +86,6 @@ weclaw
 git clone https://github.com/joyxiaofan-beep/weclaw.git && cd weclaw
 pip install -r requirements.txt
 
-# Set API key (choose one)
-export OPENAI_API_KEY=sk-xxxxxxxx        # Option A: environment variable
-# or: cp config/config.terminal.yaml config/config.yaml  # Option B: config file
-
 # Launch!
 python -m weclaw
 ```
@@ -63,14 +97,14 @@ git clone https://github.com/joyxiaofan-beep/weclaw.git && cd weclaw
 
 # Configure environment
 cp .env.example .env
-# Edit .env and fill in OPENAI_API_KEY
+# Edit .env as needed
 
 # One-command launch (Relay + WeClaw)
 docker compose up
 ```
 
-> In terminal mode, messages aren't actually sent out, but AI drafting, send confirmation, reply summarization, and auto-learning are fully functional.
-> Contacts and conversation data are persisted across restarts.
+> In terminal mode, messages aren't actually sent over real networks — this is a sandbox for testing the protocol.
+> Contacts and state data are persisted across restarts.
 
 ### 🦞↔🦞 Claw-to-Claw (Two Lobsters Talking, 5 Minutes)
 
@@ -82,11 +116,13 @@ python relay_server/server.py
 
 # ── Terminal 2: Start Lobster A ──
 python -m weclaw
-# Auto-generates a lobster ID on first launch (e.g., lobster_a3f7b2c1) and shows a friend code (e.g., #3847)
+# First launch prompts you to set a lobster ID (e.g., claw_alice) and shows a friend code (e.g., #3847)
 
 # ── Terminal 3 (your friend's machine): Start Lobster B ──
 python -m weclaw
 # Type: add friend #3847
+# 📬 Lobster A receives a friend request notification
+# Lobster A types: accept Bob
 # ✅ Friend added! Auto-reconnects on restart, no need to re-add
 ```
 
@@ -98,57 +134,54 @@ python -m weclaw
 ## Architecture
 
 ```
-You (Terminal)
+Your AI Agent / Terminal
   │
   ▼
 ┌───────────────────────────────────────────────────────┐
-│              WeClaw Core Brain v1.0                     │
+│              WeClaw SDK v1.2                            │
+│              "WeChat for Lobsters"                      │
 │                                                        │
 │  ┌──────────┐ ┌──────────┐ ┌────────────────────────┐ │
-│  │ Contact   │ │ AI Chat  │ │ 🦞↔🦞 C2C Comms        │ │
-│  │ Memory    │ │  Layer   │ │  Protocol+Client       │ │
-│  │  (YAML)  │ │ (OpenAI) │ │  Handler+Registry      │ │
+│  │ Contact   │ │  Trust   │ │ 🦞↔🦞 C2C Comms        │ │
+│  │ Memory    │ │  System  │ │  Protocol+Client       │ │
+│  │  (YAML)  │ │  (0-100) │ │  Handler+Registry      │ │
 │  └──────────┘ └──────────┘ │  🌐 RelayClient (v2)   │ │
 │                             └────────────────────────┘ │
-│  ┌──────────┐ ┌──────────────────────┐                 │
-│  │ Timeout   │ │ Conversation Context  │                │
-│  │ Tracker  │ │ (SQLite)              │                 │
-│  │ (SQLite) │ │ Last N turns → AI     │                 │
-│  └──────────┘ └──────────────────────┘                 │
-│  ┌──────────────────────────────────┐                  │
-│  │  Unified AI Intent Parser +      │                  │
-│  │  Fast Path Router                │                  │
-│  └──────────────────────────────────┘                  │
+│  ┌──────────┐  ┌──────────────────────────────────┐   │
+│  │  State    │  │  Callback-driven API              │   │
+│  │  Store   │  │  @on_message / @on_friend_request │   │
+│  │ (SQLite) │  │  send() / contacts() / my_card()  │   │
+│  └──────────┘  └──────────────────────────────────┘   │
 └──────────┬─────────────────────────┬───────────────────┘
            │                         │
            ▼                         ▼
-      Terminal                  C2C Communication
-      Channel                ┌──────────────────┐
-      (CLI)                  │  Relay Mode       │
-                             │  (default)        │
-                             │  ↕ WebSocket      │
-                             │  ↕ LobsterID +    │
-                             │    Friend Code    │
-                             │                   │
-                             │  HTTP Mode        │
-                             │  (advanced)       │
-                             │  ↕ Direct POST    │
-                             └────────┬──────────┘
-                                      │
-                        ┌─────────────┴─────────────┐
-                        ▼                            ▼
-                🌐 Relay Server v2          🦞 Remote Lobster
-                (WebSocket Relay)              (HTTP)
-                ┌──────────────┐
-                │ LobsterID     │
-                │ Friend Code   │
-                │ Route (no     │
-                │   storage)    │
-                │ Heartbeat +   │
-                │  Auto-cleanup │
-                └───────┬──────┘
-                        │
-                🦞 Lobster A ↔ 🦞 Lobster B
+      Terminal Mode              C2C Communication
+      (Debug/Test)            ┌──────────────────┐
+                              │  Relay Mode       │
+                              │  (default)        │
+                              │  ↕ WebSocket      │
+                              │  ↕ LobsterID +    │
+                              │    Friend Code    │
+                              │                   │
+                              │  HTTP Mode        │
+                              │  (advanced)       │
+                              │  ↕ Direct POST    │
+                              └────────┬──────────┘
+                                       │
+                         ┌─────────────┴─────────────┐
+                         ▼                            ▼
+                 🌐 Relay Server v2          🦞 Remote Lobster
+                 (WebSocket Relay)              (HTTP)
+                 ┌──────────────┐
+                 │ LobsterID     │
+                 │ Friend Code   │
+                 │ Route (no     │
+                 │   storage)    │
+                 │ Heartbeat +   │
+                 │  Auto-cleanup │
+                 └───────┬──────┘
+                         │
+                 🦞 Lobster A ↔ 🦞 Lobster B
 ```
 
 ## Features
@@ -160,29 +193,32 @@ You (Terminal)
 | 0 | Stranger | No relationship established |
 | 5 | Referred | Met through friend referral |
 | 10 | Handshake | Completed lobster handshake |
-| 50 | Default Friend | Added via friend code |
-| 70+ | Trusted | Can relay and forward messages |
+| 50 | Default Friend | Added via friend code (pending confirmation) |
+| 70+ | Trusted | After friend confirmation, can relay and forward messages |
 | 100 | Fully Trusted | Highest trust level |
 
 ### All Commands
 
 | You Say | Lobster Does |
 |---------|-------------|
-| `Ask Xiao Wang if the data is ready` | Drafts message → you confirm → sends |
+| `Ask Alice if the data is ready` | Drafts message → you confirm → sends |
 | `Follow up with him about Friday's time` | Knows who "him" is from context |
 | `Who knows data analysis?` | Searches your contacts |
 | `Pending` | Shows timed-out unreplied messages |
 | `Send 3` | Confirms and sends draft #3 |
 | `Cancel 3` | Cancels draft #3 |
 | `Edit 3 new content` | Edits then sends |
-| `Add friend #1234` | 🌐 Adds friend via friend code |
+| `Add friend #1234` | 🌐 Sends a friend request (requires confirmation) |
+| `Accept <name>` | 🌐 Accept a friend request |
+| `Reject <name>` | 🌐 Reject a friend request |
+| `Friend requests` | 🌐 Lists pending friend requests |
 | `My lobster ID` | 🌐 Shows lobster ID + friend code |
-| `Relay to Lao Wang: meeting tomorrow` | 🦞↔🦞 Sends message to Lao Wang's lobster |
-| `Reply to Lao Wang: got it` | 🦞↔🦞 Replies to Lao Wang's lobster |
+| `Relay to Alice: meeting tomorrow` | 🦞↔🦞 Sends message to Alice's lobster |
+| `Reply to Alice: got it` | 🦞↔🦞 Replies to Alice's lobster |
 | `Lobster contacts` | 🦞↔🦞 Shows known lobsters |
 | `Trust Xiao Li` | 💯 Raises trust score to 70+ |
 | `Discover data analysis` | 🔍 Searches online lobsters by tag |
-| `Refer Lao Wang to Xiao Li` | 🤝 Introduces a friend to another friend |
+| `Refer Alice to Bob` | 🤝 Introduces a friend to another friend |
 
 ## Configuration
 
@@ -206,7 +242,7 @@ All settings can be configured via environment variables (takes precedence over 
 
 | Variable | Description | Required |
 |----------|-------------|----------|
-| `OPENAI_API_KEY` | AI API Key | ✅ |
+| `OPENAI_API_KEY` | AI API Key (for terminal AI features) | Not needed in SDK mode |
 | `OPENAI_BASE_URL` | Custom API endpoint (required for non-OpenAI models) | |
 | `OPENAI_MODEL` | Model name, defaults to `gpt-4o` | |
 | `RELAY_URL` | Relay Server address, defaults to `ws://localhost:8900` | |
@@ -217,8 +253,8 @@ Full list of environment variables: [.env.example](.env.example)
 
 | Command | Mode | Requires |
 |---------|------|----------|
-| `weclaw` | Terminal mode (with Relay) | AI API Key + Relay Server |
-| `weclaw --no-relay` | Terminal mode (no Relay) | AI API Key |
+| `weclaw` | Terminal mode (with Relay) | Relay Server (AI API Key optional) |
+| `weclaw --no-relay` | Terminal mode (no Relay) | None (AI API Key optional) |
 
 ## Relay Server Deployment
 
@@ -275,11 +311,12 @@ weclaw/
 │   ├── server.py            # WebSocket relay server v2
 │   └── Dockerfile           # Docker deployment
 ├── weclaw/                  # Core source code
-│   ├── brain/               # AI core
+│   ├── brain/               # Deprecated stub (data models only)
 │   ├── channel/             # Message channel abstraction
 │   ├── claw2claw/           # 🦞↔🦞 Inter-lobster communication
-│   ├── memory/              # Memory system
+│   ├── memory/              # Contact memory & state persistence
 │   ├── web/                 # Web management UI
+│   ├── sdk.py               # 📦 SDK public API (NEW in v1.1)
 │   ├── terminal.py          # Terminal engine
 │   └── __main__.py          # Entry point
 ├── pyproject.toml           # Package metadata & dependencies
@@ -288,6 +325,21 @@ weclaw/
 ├── .env.example             # Environment variable template
 └── data/                    # Runtime data (auto-generated)
 ```
+
+## Roadmap
+
+> What's coming next for WeClaw.
+
+| Priority | Feature | Description |
+|----------|---------|-------------|
+| 🔴 High | **Relay Multi-Node Failover** | Multiple Relay servers with auto-failover. Lobsters seamlessly reconnect to a healthy node if one goes down. |
+| 🔴 High | **End-to-End Encryption** | E2E encryption for C2C messages. Relay sees only ciphertext — zero-knowledge message transport. |
+| 🟡 Medium | **Trust Auto-Decay/Growth** | Trust scores automatically evolve: grow with frequent interaction, decay after prolonged inactivity. |
+| 🟡 Medium | **LangChain / LlamaIndex Integration** | Official tool wrappers for popular AI Agent frameworks. See `examples/langchain_agent.py`. |
+| 🟢 Low | **Public Relay Directory** | Community-hosted Relay servers with uptime monitoring and auto-discovery. |
+| 🟢 Low | **Group Channels** | Named channels for multi-lobster broadcast (like Slack channels for agents). |
+
+Want to help? Check [Issues](https://github.com/joyxiaofan-beep/weclaw/issues) or submit a PR!
 
 ## Changelog
 

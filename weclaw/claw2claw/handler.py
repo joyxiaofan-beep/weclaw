@@ -1,5 +1,5 @@
 """
-C2C Handler — 处理其他龙虾发来的消息 (v0.8)
+C2C Handler — 处理其他龙虾发来的消息 (v1.1)
 
 职责：
 1. 接收远程龙虾的消息（通过 /c2c/incoming 端点）
@@ -16,16 +16,18 @@ C2C Handler — 处理其他龙虾发来的消息 (v0.8)
     → 验签（如果有 shared_secret）
     → 根据 msg_type 分发：
         handshake → 交换名片 + Welcome Bubbles，注册到 PeerRegistry，+信任事件
-        message → 记录 + 通知主人 + AI 生成摘要 + 信任+2
-        query → AI 生成回答 → 直接回复
+        message → 记录 + 通知主人 + 信任+2
+        query → 通知主人来回答
         status → 更新对方状态
         ack → 标记已送达
         introduce → 处理好友引荐（v0.7）
+
+v1.1.0: AI digest 已移除，所有查询由主人决定如何回答。
 """
 
 import time
 from datetime import datetime
-from typing import Optional, Callable
+from typing import Callable, Optional
 from collections import defaultdict
 
 from loguru import logger
@@ -51,7 +53,6 @@ class C2CHandler:
         my_card: AgentCard,
         peer_registry: PeerRegistry,
         notify_owner_fn: Optional[Callable[[str], None]] = None,
-        ai_digest_fn: Optional[Callable[[str, str], str]] = None,
         state_store=None,
         behavior: Optional[AgentBehavior] = None,
     ):
@@ -60,14 +61,12 @@ class C2CHandler:
             my_card: 我自己的龙虾名片
             peer_registry: 已知龙虾通讯录
             notify_owner_fn: 通知主人的回调 (message_str) -> None
-            ai_digest_fn: AI 摘要/回答回调 (from_name, content) -> str
             state_store: StateStore 实例（可选，用于持久化 inbox）
             behavior: 行为规则配置（v0.8）
         """
         self.my_card = my_card
         self.peers = peer_registry
         self._notify_owner = notify_owner_fn
-        self._ai_digest = ai_digest_fn
         self._store = state_store
         self._behavior = behavior or AgentBehavior()
 
@@ -399,7 +398,8 @@ class C2CHandler:
         """
         处理查询请求
 
-        对方龙虾问了一个问题 → AI 尝试回答 → 如果不能自主回答则通知主人
+        对方龙虾问了一个问题 → 通知主人来决定如何回答
+        v1.1.0: AI 自动回答已移除，所有查询都转给主人处理。
         """
         # 记录到收件箱
         inbox_entry = {
@@ -414,50 +414,23 @@ class C2CHandler:
         if self._store:
             self._store.save_c2c_message(inbox_entry)
 
-        # 尝试 AI 生成回答
-        answer = None
-        if self._ai_digest:
-            try:
-                answer = self._ai_digest(msg.from_owner_name, msg.content)
-            except Exception as e:
-                logger.warning(f"AI 生成回答失败: {e}")
-
-        if answer:
-            # 能自主回答
-            if self._notify_owner:
-                self._notify_owner(
-                    f"🦞❓ {msg.from_owner_name} 的龙虾问：「{msg.content}」\n"
-                    f"🦞💬 我自动回复了：「{answer}」"
-                )
-
-            return C2CMessage(
-                from_lobster_id=self.my_card.lobster_id,
-                from_lobster_name=self.my_card.lobster_name,
-                from_owner_name=self.my_card.owner_name,
-                msg_type="message",
-                content=answer,
-                reply_to=msg.message_id,
-                conversation_id=msg.conversation_id,
+        # 通知主人
+        if self._notify_owner:
+            self._notify_owner(
+                f"🦞❓ {msg.from_owner_name} 的龙虾问了：\n\n"
+                f"「{msg.content}」\n\n"
+                f"回复 '龙虾回 {msg.from_owner_name} <你的回答>' 来回复。"
             )
-        else:
-            # 不能自主回答 → 通知主人
-            if self._notify_owner:
-                self._notify_owner(
-                    f"🦞❓ {msg.from_owner_name} 的龙虾问了：\n\n"
-                    f"「{msg.content}」\n\n"
-                    f"我不确定怎么回答，需要你来决定。\n"
-                    f"回复 '龙虾回 {msg.from_owner_name} <你的回答>' 来回复。"
-                )
 
-            return C2CMessage(
-                from_lobster_id=self.my_card.lobster_id,
-                from_lobster_name=self.my_card.lobster_name,
-                from_owner_name=self.my_card.owner_name,
-                msg_type="status",
-                content=f"已收到你的问题，{self.my_card.owner_name} 稍后回复",
-                reply_to=msg.message_id,
-                conversation_id=msg.conversation_id,
-            )
+        return C2CMessage(
+            from_lobster_id=self.my_card.lobster_id,
+            from_lobster_name=self.my_card.lobster_name,
+            from_owner_name=self.my_card.owner_name,
+            msg_type="status",
+            content=f"已收到你的问题，{self.my_card.owner_name} 稍后回复",
+            reply_to=msg.message_id,
+            conversation_id=msg.conversation_id,
+        )
 
     # ──────────────────────────────────────────
     # 状态 & ACK

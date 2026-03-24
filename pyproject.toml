@@ -4,8 +4,8 @@ build-backend = "hatchling.build"
 
 [project]
 name = "weclaw"
-version = "1.0.0"
-description = "🦞 WeClaw — 龙虾社交智能代理，让你的龙虾成为你与人际网络之间的智能接口"
+version = "1.2.0"
+description = "🦞 WeClaw — 龙虾社交通信协议 SDK，AI Agent 的社交通信层"
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.10"
@@ -26,8 +26,6 @@ classifiers = [
 ]
 
 dependencies = [
-    "openai>=1.0.0",
-    "tenacity>=8.2.0",
     "httpx>=0.27.0",
     "aiohttp>=3.9.0",
     "websockets>=12.0",
@@ -38,6 +36,10 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+ai = [
+    "openai>=1.0.0",
+    "tenacity>=8.2.0",
+]
 dev = [
     "pytest>=7.0",
     "pytest-asyncio>=0.21",
