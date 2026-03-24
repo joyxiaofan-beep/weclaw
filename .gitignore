@@ -1,6 +1,14 @@
-# 配置文件（包含敏感信息）
+# 🔒 敏感文件（API keys、密码等）— 绝对不能提交！
 config/config.yaml
 .env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+id_rsa*
+id_ed25519*
 
 # 运行时数据
 data/

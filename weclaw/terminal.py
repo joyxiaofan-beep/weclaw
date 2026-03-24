@@ -120,6 +120,12 @@ def _load_terminal_config() -> dict:
     if env_model:
         config["ai"]["model"] = env_model
 
+    # 安全日志：只显示遮蔽后的 key，绝不在终端暴露完整 key
+    from weclaw.brain.core import mask_api_key
+    loaded_key = config["ai"].get("api_key", "")
+    if loaded_key:
+        _print_system(f"API Key: {mask_api_key(loaded_key)}")
+
     # Relay 环境变量
     env_relay = os.environ.get("RELAY_URL", "")
     if env_relay:

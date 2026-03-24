@@ -18,6 +18,19 @@ from typing import Optional
 
 from openai import OpenAI
 from loguru import logger
+
+
+def mask_api_key(key: str) -> str:
+    """遮蔽 API key，仅显示前4后4字符，用于安全日志输出。
+    
+    >>> mask_api_key("sk-abcdef1234567890abcdef1234567890")
+    'sk-a***7890'
+    >>> mask_api_key("short")
+    '****'
+    """
+    if not key or len(key) <= 8:
+        return "****"
+    return f"{key[:4]}***{key[-4:]}"
 from pydantic import BaseModel, Field
 from tenacity import (
     retry,
