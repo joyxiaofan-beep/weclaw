@@ -1,0 +1,1173 @@
+<!DOCTYPE html>
+<html lang="zh-CN" class="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>🦞 WeClaw — 人脉通讯录</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+tailwind.config = {
+  darkMode: 'class',
+  theme: {
+    extend: {
+      colors: {
+        zinc: {
+          850: '#1e1e22',
+          950: '#0c0c0e',
+        },
+        accent: {
+          DEFAULT: '#22d3ee', // cyan-400
+          hover: '#06b6d4',  // cyan-500
+          dim: '#155e75',    // cyan-800
+          glow: 'rgba(34, 211, 238, 0.15)',
+        }
+      }
+    }
+  }
+}
+</script>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    background: #09090b;
+    color: #e4e4e7;
+    overflow: hidden;
+    height: 100vh;
+  }
+
+  /* Scrollbar */
+  ::-webkit-scrollbar { width: 6px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: #3f3f46; border-radius: 3px; }
+  ::-webkit-scrollbar-thumb:hover { background: #52525b; }
+
+  /* Sidebar */
+  .sidebar {
+    width: 320px;
+    min-width: 320px;
+    background: #18181b;
+    border-right: 1px solid #27272a;
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+    transition: width 0.2s;
+  }
+
+  /* Contact list item */
+  .contact-item {
+    padding: 12px 16px;
+    cursor: pointer;
+    border-bottom: 1px solid #1f1f23;
+    transition: all 0.15s ease;
+  }
+  .contact-item:hover {
+    background: #22d3ee0a;
+  }
+  .contact-item.active {
+    background: rgba(34, 211, 238, 0.08);
+    border-left: 3px solid #22d3ee;
+  }
+
+  /* Tag */
+  .tag {
+    display: inline-flex;
+    align-items: center;
+    padding: 2px 8px;
+    border-radius: 9999px;
+    font-size: 11px;
+    font-weight: 500;
+    background: #27272a;
+    color: #a1a1aa;
+    border: 1px solid #3f3f46;
+  }
+  .tag-cyan {
+    background: rgba(34, 211, 238, 0.1);
+    color: #22d3ee;
+    border-color: rgba(34, 211, 238, 0.2);
+  }
+
+  /* Input */
+  .input-field {
+    background: #27272a;
+    border: 1px solid #3f3f46;
+    border-radius: 8px;
+    padding: 8px 12px;
+    color: #e4e4e7;
+    font-size: 14px;
+    transition: border-color 0.15s;
+    width: 100%;
+  }
+  .input-field:focus {
+    outline: none;
+    border-color: #22d3ee;
+    box-shadow: 0 0 0 3px rgba(34, 211, 238, 0.1);
+  }
+  .input-field::placeholder { color: #52525b; }
+
+  /* Buttons */
+  .btn {
+    padding: 8px 16px;
+    border-radius: 8px;
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.15s;
+    border: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .btn-primary {
+    background: #22d3ee;
+    color: #09090b;
+  }
+  .btn-primary:hover { background: #06b6d4; }
+  .btn-secondary {
+    background: #27272a;
+    color: #e4e4e7;
+    border: 1px solid #3f3f46;
+  }
+  .btn-secondary:hover { background: #3f3f46; }
+  .btn-danger {
+    background: rgba(239, 68, 68, 0.1);
+    color: #ef4444;
+    border: 1px solid rgba(239, 68, 68, 0.2);
+  }
+  .btn-danger:hover { background: rgba(239, 68, 68, 0.2); }
+  .btn-sm { padding: 5px 10px; font-size: 12px; }
+
+  /* Card */
+  .card {
+    background: #18181b;
+    border: 1px solid #27272a;
+    border-radius: 12px;
+    padding: 20px;
+  }
+
+  /* Interaction timeline */
+  .timeline-item {
+    position: relative;
+    padding-left: 24px;
+    padding-bottom: 16px;
+  }
+  .timeline-item::before {
+    content: '';
+    position: absolute;
+    left: 5px;
+    top: 8px;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #3f3f46;
+  }
+  .timeline-item::after {
+    content: '';
+    position: absolute;
+    left: 8px;
+    top: 20px;
+    bottom: 0;
+    width: 2px;
+    background: #27272a;
+  }
+  .timeline-item:last-child::after { display: none; }
+  .timeline-item.outgoing::before { background: #22d3ee; }
+  .timeline-item.incoming::before { background: #a78bfa; }
+
+  /* Modal */
+  .modal-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.6);
+    backdrop-filter: blur(4px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 50;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.2s;
+  }
+  .modal-overlay.open {
+    opacity: 1;
+    pointer-events: all;
+  }
+  .modal-content {
+    background: #18181b;
+    border: 1px solid #27272a;
+    border-radius: 16px;
+    padding: 24px;
+    max-width: 520px;
+    width: 90%;
+    max-height: 80vh;
+    overflow-y: auto;
+    transform: translateY(20px);
+    transition: transform 0.2s;
+  }
+  .modal-overlay.open .modal-content {
+    transform: translateY(0);
+  }
+
+  /* Stats card */
+  .stat-value {
+    font-size: 28px;
+    font-weight: 700;
+    color: #22d3ee;
+    line-height: 1;
+  }
+  .stat-label {
+    font-size: 12px;
+    color: #71717a;
+    margin-top: 4px;
+  }
+
+  /* Toast */
+  .toast {
+    position: fixed;
+    bottom: 24px;
+    right: 24px;
+    padding: 12px 20px;
+    border-radius: 10px;
+    font-size: 13px;
+    font-weight: 500;
+    z-index: 100;
+    transform: translateY(100px);
+    opacity: 0;
+    transition: all 0.3s ease;
+  }
+  .toast.show {
+    transform: translateY(0);
+    opacity: 1;
+  }
+  .toast-success {
+    background: rgba(34, 197, 94, 0.15);
+    color: #4ade80;
+    border: 1px solid rgba(34, 197, 94, 0.2);
+  }
+  .toast-error {
+    background: rgba(239, 68, 68, 0.15);
+    color: #f87171;
+    border: 1px solid rgba(239, 68, 68, 0.2);
+  }
+
+  /* Empty state */
+  .empty-state {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    color: #52525b;
+    gap: 12px;
+  }
+  .empty-state svg {
+    width: 64px;
+    height: 64px;
+    opacity: 0.3;
+  }
+
+  /* Tab bar */
+  .tab-bar {
+    display: flex;
+    gap: 0;
+    border-bottom: 1px solid #27272a;
+    margin-bottom: 16px;
+  }
+  .tab {
+    padding: 10px 16px;
+    font-size: 13px;
+    font-weight: 500;
+    color: #71717a;
+    cursor: pointer;
+    border-bottom: 2px solid transparent;
+    transition: all 0.15s;
+  }
+  .tab:hover { color: #a1a1aa; }
+  .tab.active {
+    color: #22d3ee;
+    border-bottom-color: #22d3ee;
+  }
+
+  /* Edit mode highlight */
+  .edit-highlight {
+    animation: pulse-border 2s infinite;
+  }
+  @keyframes pulse-border {
+    0%, 100% { border-color: #3f3f46; }
+    50% { border-color: #22d3ee; }
+  }
+
+  /* Loading skeleton */
+  .skeleton {
+    background: linear-gradient(90deg, #27272a 25%, #3f3f46 50%, #27272a 75%);
+    background-size: 200% 100%;
+    animation: shimmer 1.5s infinite;
+    border-radius: 6px;
+  }
+  @keyframes shimmer {
+    0% { background-position: 200% 0; }
+    100% { background-position: -200% 0; }
+  }
+
+  /* Responsive */
+  @media (max-width: 768px) {
+    .sidebar {
+      position: fixed;
+      left: -320px;
+      z-index: 40;
+      transition: left 0.3s;
+    }
+    .sidebar.mobile-open { left: 0; }
+    .mobile-toggle { display: flex !important; }
+  }
+</style>
+</head>
+<body>
+
+<div id="app" style="display:flex; height:100vh;">
+
+  <!-- ======================== SIDEBAR ======================== -->
+  <aside class="sidebar" id="sidebar">
+    <!-- Header -->
+    <div style="padding:16px; border-bottom:1px solid #27272a;">
+      <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:12px;">
+        <div style="display:flex; align-items:center; gap:8px;">
+          <span style="font-size:20px;">🦞</span>
+          <span style="font-size:15px; font-weight:600; color:#e4e4e7;">人脉通讯录</span>
+        </div>
+        <button class="btn btn-primary btn-sm" onclick="openCreateModal()">
+          <svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M12 4v16m8-8H4"/></svg>
+          新增
+        </button>
+      </div>
+
+      <!-- Search -->
+      <div style="position:relative;">
+        <svg style="position:absolute; left:10px; top:9px; color:#52525b;" width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path stroke-linecap="round" stroke-width="2" d="m21 21-4.35-4.35"/></svg>
+        <input class="input-field" id="searchInput" placeholder="搜索姓名、部门、擅长领域…" style="padding-left:34px;" oninput="filterContacts()">
+      </div>
+
+      <!-- Sort -->
+      <div style="display:flex; gap:6px; margin-top:8px;">
+        <button class="btn btn-secondary btn-sm sort-btn active" data-sort="name" onclick="setSort('name')">姓名</button>
+        <button class="btn btn-secondary btn-sm sort-btn" data-sort="interactions" onclick="setSort('interactions')">交互↓</button>
+        <button class="btn btn-secondary btn-sm sort-btn" data-sort="last_contact" onclick="setSort('last_contact')">最近↓</button>
+      </div>
+    </div>
+
+    <!-- Contact List -->
+    <div id="contactList" style="flex:1; overflow-y:auto; padding:4px 0;"></div>
+
+    <!-- Stats Footer -->
+    <div id="statsBar" style="padding:12px 16px; border-top:1px solid #27272a; display:flex; gap:16px;">
+      <div>
+        <div class="stat-value" id="statTotal">-</div>
+        <div class="stat-label">联系人</div>
+      </div>
+      <div>
+        <div class="stat-value" id="statInteractions">-</div>
+        <div class="stat-label">总交互</div>
+      </div>
+      <div>
+        <div class="stat-value" id="statActive">-</div>
+        <div class="stat-label">本月活跃</div>
+      </div>
+    </div>
+  </aside>
+
+  <!-- ======================== MAIN ======================== -->
+  <main style="flex:1; overflow-y:auto; position:relative;">
+    <!-- Mobile toggle -->
+    <button class="btn btn-secondary mobile-toggle" style="display:none; position:fixed; top:12px; left:12px; z-index:30; padding:8px;"
+            onclick="document.getElementById('sidebar').classList.toggle('mobile-open')">
+      <svg width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"/></svg>
+    </button>
+
+    <!-- Empty State -->
+    <div id="emptyState" class="empty-state">
+      <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"/></svg>
+      <p style="font-size:15px; font-weight:500;">选择一个联系人查看详情</p>
+      <p style="font-size:13px;">点击左侧列表中的联系人，或新增一个</p>
+    </div>
+
+    <!-- Detail Panel -->
+    <div id="detailPanel" style="display:none; padding:24px; max-width:800px; margin:0 auto;">
+
+      <!-- Contact Header -->
+      <div style="display:flex; align-items:flex-start; justify-content:space-between; margin-bottom:24px;">
+        <div>
+          <div style="display:flex; align-items:center; gap:10px; margin-bottom:4px;">
+            <div id="detailAvatar" style="width:48px; height:48px; border-radius:50%; background:#27272a; display:flex; align-items:center; justify-content:center; font-size:20px; font-weight:600; color:#22d3ee;"></div>
+            <div>
+              <h1 id="detailName" style="font-size:22px; font-weight:700; color:#fafafa;"></h1>
+              <p id="detailSubtitle" style="font-size:13px; color:#71717a;"></p>
+            </div>
+          </div>
+        </div>
+        <div style="display:flex; gap:8px;">
+          <button class="btn btn-secondary btn-sm" onclick="openEditMode()">
+            <svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/></svg>
+            编辑
+          </button>
+          <button class="btn btn-danger btn-sm" onclick="confirmDelete()">
+            <svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+            删除
+          </button>
+        </div>
+      </div>
+
+      <!-- Tabs -->
+      <div class="tab-bar">
+        <div class="tab active" data-tab="profile" onclick="switchTab('profile')">📋 画像信息</div>
+        <div class="tab" data-tab="timeline" onclick="switchTab('timeline')">💬 交互时间线</div>
+        <div class="tab" data-tab="merge" onclick="switchTab('merge')">🔀 合并联系人</div>
+      </div>
+
+      <!-- Tab: Profile -->
+      <div id="tab-profile" class="tab-content">
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px;">
+          <!-- Basic Info -->
+          <div class="card">
+            <h3 style="font-size:13px; font-weight:600; color:#71717a; text-transform:uppercase; letter-spacing:0.05em; margin-bottom:12px;">基本信息</h3>
+            <div id="profileBasic" style="display:flex; flex-direction:column; gap:10px;"></div>
+          </div>
+
+          <!-- Stats -->
+          <div class="card">
+            <h3 style="font-size:13px; font-weight:600; color:#71717a; text-transform:uppercase; letter-spacing:0.05em; margin-bottom:12px;">互动统计</h3>
+            <div id="profileStats" style="display:flex; flex-direction:column; gap:10px;"></div>
+          </div>
+        </div>
+
+        <!-- Expertise -->
+        <div class="card" style="margin-top:16px;">
+          <h3 style="font-size:13px; font-weight:600; color:#71717a; text-transform:uppercase; letter-spacing:0.05em; margin-bottom:12px;">擅长领域</h3>
+          <div id="profileExpertise" style="display:flex; flex-wrap:wrap; gap:6px;"></div>
+        </div>
+
+        <!-- Traits -->
+        <div class="card" style="margin-top:16px;">
+          <h3 style="font-size:13px; font-weight:600; color:#71717a; text-transform:uppercase; letter-spacing:0.05em; margin-bottom:12px;">沟通特征</h3>
+          <div id="profileTraits" style="display:flex; flex-wrap:wrap; gap:6px;"></div>
+        </div>
+
+        <!-- Notes -->
+        <div class="card" style="margin-top:16px;">
+          <h3 style="font-size:13px; font-weight:600; color:#71717a; text-transform:uppercase; letter-spacing:0.05em; margin-bottom:12px;">备注 / 印象</h3>
+          <div id="profileNotes"></div>
+        </div>
+
+        <!-- AI Summary -->
+        <div class="card" style="margin-top:16px;">
+          <h3 style="font-size:13px; font-weight:600; color:#71717a; text-transform:uppercase; letter-spacing:0.05em; margin-bottom:12px;">🤖 AI 综合画像</h3>
+          <p id="profileSummary" style="font-size:14px; color:#a1a1aa; line-height:1.6;"></p>
+        </div>
+      </div>
+
+      <!-- Tab: Timeline -->
+      <div id="tab-timeline" class="tab-content" style="display:none;">
+        <div id="timelineContainer"></div>
+        <div id="timelineLoadMore" style="text-align:center; padding:16px; display:none;">
+          <button class="btn btn-secondary btn-sm" onclick="loadMoreInteractions()">加载更多</button>
+        </div>
+      </div>
+
+      <!-- Tab: Merge -->
+      <div id="tab-merge" class="tab-content" style="display:none;">
+        <div class="card">
+          <h3 style="font-size:14px; font-weight:600; margin-bottom:8px;">🔀 合并联系人</h3>
+          <p style="font-size:13px; color:#71717a; margin-bottom:16px;">将另一个联系人的数据合并到当前联系人中。被合并的联系人将被删除。</p>
+          <div style="display:flex; gap:8px; align-items:flex-end;">
+            <div style="flex:1;">
+              <label style="font-size:12px; color:#71717a; display:block; margin-bottom:4px;">选择要合并的联系人</label>
+              <select id="mergeSelect" class="input-field" style="cursor:pointer;"></select>
+            </div>
+            <button class="btn btn-primary" onclick="performMerge()">合并</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </main>
+</div>
+
+<!-- ======================== MODALS ======================== -->
+
+<!-- Create Contact Modal -->
+<div class="modal-overlay" id="createModal">
+  <div class="modal-content">
+    <h2 style="font-size:18px; font-weight:600; margin-bottom:16px; display:flex; align-items:center; gap:8px;">
+      <svg width="20" height="20" fill="none" stroke="#22d3ee" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18 9v3m0 0v3m0-3h3m-3 0h-3m-2-5a4 4 0 11-8 0 4 4 0 018 0zM3 20a6 6 0 0112 0v1H3v-1z"/></svg>
+      新增联系人
+    </h2>
+    <form id="createForm" onsubmit="submitCreate(event)">
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px;">
+        <div>
+          <label style="font-size:12px; color:#71717a; display:block; margin-bottom:4px;">称呼 *</label>
+          <input class="input-field" name="name" required placeholder="你怎么叫他">
+        </div>
+        <div>
+          <label style="font-size:12px; color:#71717a; display:block; margin-bottom:4px;">真名</label>
+          <input class="input-field" name="real_name" placeholder="真实姓名">
+        </div>
+        <div>
+          <label style="font-size:12px; color:#71717a; display:block; margin-bottom:4px;">部门</label>
+          <input class="input-field" name="department" placeholder="所在部门">
+        </div>
+        <div>
+          <label style="font-size:12px; color:#71717a; display:block; margin-bottom:4px;">职级/角色</label>
+          <input class="input-field" name="title" placeholder="职位或角色">
+        </div>
+        <div style="grid-column: span 2;">
+          <label style="font-size:12px; color:#71717a; display:block; margin-bottom:4px;">外部 ID</label>
+          <input class="input-field" name="external_id" placeholder="外部标识（用于发消息）">
+        </div>
+        <div style="grid-column: span 2;">
+          <label style="font-size:12px; color:#71717a; display:block; margin-bottom:4px;">擅长领域（逗号分隔）</label>
+          <input class="input-field" name="expertise" placeholder="前端开发, 数据分析, 项目管理...">
+        </div>
+        <div style="grid-column: span 2;">
+          <label style="font-size:12px; color:#71717a; display:block; margin-bottom:4px;">备注</label>
+          <textarea class="input-field" name="notes" rows="2" placeholder="任何你想记住的信息"></textarea>
+        </div>
+      </div>
+      <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:16px;">
+        <button type="button" class="btn btn-secondary" onclick="closeModal('createModal')">取消</button>
+        <button type="submit" class="btn btn-primary">创建</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- Edit Contact Modal -->
+<div class="modal-overlay" id="editModal">
+  <div class="modal-content">
+    <h2 style="font-size:18px; font-weight:600; margin-bottom:16px; display:flex; align-items:center; gap:8px;">
+      <svg width="20" height="20" fill="none" stroke="#22d3ee" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/></svg>
+      编辑联系人
+    </h2>
+    <form id="editForm" onsubmit="submitEdit(event)">
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px;">
+        <div>
+          <label style="font-size:12px; color:#71717a; display:block; margin-bottom:4px;">称呼</label>
+          <input class="input-field" name="name" id="editName">
+        </div>
+        <div>
+          <label style="font-size:12px; color:#71717a; display:block; margin-bottom:4px;">真名</label>
+          <input class="input-field" name="real_name" id="editRealName">
+        </div>
+        <div>
+          <label style="font-size:12px; color:#71717a; display:block; margin-bottom:4px;">部门</label>
+          <input class="input-field" name="department" id="editDept">
+        </div>
+        <div>
+          <label style="font-size:12px; color:#71717a; display:block; margin-bottom:4px;">职级/角色</label>
+          <input class="input-field" name="title" id="editTitle">
+        </div>
+        <div style="grid-column: span 2;">
+          <label style="font-size:12px; color:#71717a; display:block; margin-bottom:4px;">外部 ID</label>
+          <input class="input-field" name="external_id" id="editExternalId">
+        </div>
+        <div style="grid-column: span 2;">
+          <label style="font-size:12px; color:#71717a; display:block; margin-bottom:4px;">擅长领域（逗号分隔）</label>
+          <input class="input-field" name="expertise" id="editExpertise">
+        </div>
+        <div style="grid-column: span 2;">
+          <label style="font-size:12px; color:#71717a; display:block; margin-bottom:4px;">沟通特征（逗号分隔）</label>
+          <input class="input-field" name="traits" id="editTraits">
+        </div>
+        <div style="grid-column: span 2;">
+          <label style="font-size:12px; color:#71717a; display:block; margin-bottom:4px;">备注（每行一条）</label>
+          <textarea class="input-field" name="notes" id="editNotes" rows="3"></textarea>
+        </div>
+        <div style="grid-column: span 2;">
+          <label style="font-size:12px; color:#71717a; display:block; margin-bottom:4px;">AI 综合画像</label>
+          <textarea class="input-field" name="ai_summary" id="editAiSummary" rows="2"></textarea>
+        </div>
+      </div>
+      <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:16px;">
+        <button type="button" class="btn btn-secondary" onclick="closeModal('editModal')">取消</button>
+        <button type="submit" class="btn btn-primary">保存</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- Delete Confirm Modal -->
+<div class="modal-overlay" id="deleteModal">
+  <div class="modal-content" style="max-width:400px;">
+    <h2 style="font-size:18px; font-weight:600; margin-bottom:8px; color:#f87171;">⚠️ 确认删除</h2>
+    <p style="font-size:14px; color:#a1a1aa; margin-bottom:16px;">确定要删除 <strong id="deleteName" style="color:#e4e4e7;"></strong> 吗？此操作不可撤销，交互历史也会一并删除。</p>
+    <div style="display:flex; justify-content:flex-end; gap:8px;">
+      <button class="btn btn-secondary" onclick="closeModal('deleteModal')">取消</button>
+      <button class="btn btn-danger" onclick="performDelete()">删除</button>
+    </div>
+  </div>
+</div>
+
+<!-- Token Setup Modal -->
+<div class="modal-overlay open" id="tokenModal">
+  <div class="modal-content" style="max-width:420px;">
+    <div style="text-align:center; margin-bottom:16px;">
+      <span style="font-size:40px;">🦞</span>
+      <h2 style="font-size:20px; font-weight:700; margin-top:8px;">WeClaw 人脉通讯录</h2>
+      <p style="font-size:13px; color:#71717a; margin-top:4px;">输入 API Token 以访问通讯录</p>
+    </div>
+    <form onsubmit="submitToken(event)">
+      <input class="input-field" id="tokenInput" type="password" placeholder="Bearer Token" style="text-align:center; font-size:15px;" autofocus>
+      <button type="submit" class="btn btn-primary" style="width:100%; margin-top:12px; justify-content:center;">
+        进入通讯录
+      </button>
+    </form>
+    <p style="font-size:11px; color:#3f3f46; text-align:center; margin-top:12px;">Token 配置在 config.yaml 的 security.api_token 中</p>
+  </div>
+</div>
+
+<!-- Toast -->
+<div class="toast" id="toast"></div>
+
+<script>
+// ──────────────────────────────────────────
+// State
+// ──────────────────────────────────────────
+
+let API_TOKEN = localStorage.getItem('weclaw_token') || '';
+let contacts = [];
+let currentContact = null;
+let currentSort = 'name';
+let interactionOffset = 0;
+const INTERACTION_PAGE_SIZE = 20;
+
+// ──────────────────────────────────────────
+// API
+// ──────────────────────────────────────────
+
+async function api(method, path, body = null) {
+  const opts = {
+    method,
+    headers: {
+      'Authorization': `Bearer ${API_TOKEN}`,
+      'Content-Type': 'application/json',
+    },
+  };
+  if (body) opts.body = JSON.stringify(body);
+  const res = await fetch(path, opts);
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }));
+    throw new Error(err.detail || `HTTP ${res.status}`);
+  }
+  return res.json();
+}
+
+// ──────────────────────────────────────────
+// Token
+// ──────────────────────────────────────────
+
+function submitToken(e) {
+  e.preventDefault();
+  API_TOKEN = document.getElementById('tokenInput').value.trim();
+  if (!API_TOKEN) return;
+  localStorage.setItem('weclaw_token', API_TOKEN);
+  closeModal('tokenModal');
+  loadContacts();
+}
+
+// Check if we have a saved token
+if (API_TOKEN) {
+  closeModal('tokenModal');
+  document.getElementById('tokenModal').classList.remove('open');
+  loadContacts();
+}
+
+// ──────────────────────────────────────────
+// Load contacts
+// ──────────────────────────────────────────
+
+async function loadContacts() {
+  try {
+    const q = document.getElementById('searchInput').value;
+    const data = await api('GET', `/api/contacts?q=${encodeURIComponent(q)}&sort=${currentSort}`);
+    contacts = data.contacts;
+    renderContactList();
+    renderStats();
+  } catch (err) {
+    if (err.message.includes('401') || err.message.includes('无效')) {
+      // Token invalid
+      localStorage.removeItem('weclaw_token');
+      document.getElementById('tokenModal').classList.add('open');
+      showToast('Token 无效，请重新输入', 'error');
+    } else {
+      showToast('加载失败: ' + err.message, 'error');
+    }
+  }
+}
+
+// ──────────────────────────────────────────
+// Render contact list
+// ──────────────────────────────────────────
+
+function renderContactList() {
+  const container = document.getElementById('contactList');
+  if (!contacts.length) {
+    container.innerHTML = `
+      <div style="padding:40px 16px; text-align:center; color:#52525b;">
+        <p style="font-size:14px;">暂无联系人</p>
+        <p style="font-size:12px; margin-top:4px;">点击上方"新增"按钮添加</p>
+      </div>`;
+    return;
+  }
+
+  container.innerHTML = contacts.map(c => {
+    const isActive = currentContact && currentContact.name === c.name;
+    const expertiseStr = (c.expertise || []).slice(0, 2).join(', ') || '—';
+    const initial = (c.real_name || c.name)[0];
+    const lastContact = c.last_contact ? c.last_contact.slice(0, 10) : '从未';
+
+    return `
+      <div class="contact-item ${isActive ? 'active' : ''}" onclick="selectContact('${escapeHtml(c.name)}')">
+        <div style="display:flex; align-items:center; gap:10px;">
+          <div style="width:36px; height:36px; border-radius:50%; background:#27272a; display:flex; align-items:center; justify-content:center; font-size:14px; font-weight:600; color:#22d3ee; flex-shrink:0;">
+            ${escapeHtml(initial)}
+          </div>
+          <div style="flex:1; min-width:0;">
+            <div style="display:flex; align-items:center; gap:6px;">
+              <span style="font-size:14px; font-weight:500; color:#e4e4e7;">${escapeHtml(c.name)}</span>
+              ${c.real_name && c.real_name !== c.name ? `<span style="font-size:11px; color:#52525b;">(${escapeHtml(c.real_name)})</span>` : ''}
+            </div>
+            <div style="font-size:12px; color:#71717a; margin-top:2px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
+              ${escapeHtml(expertiseStr)}
+            </div>
+          </div>
+          <div style="text-align:right; flex-shrink:0;">
+            <div style="font-size:11px; color:#52525b;">${escapeHtml(lastContact)}</div>
+            <div style="font-size:11px; color:#3f3f46; margin-top:2px;">${c.total_interactions || 0}次</div>
+          </div>
+        </div>
+      </div>`;
+  }).join('');
+}
+
+// ──────────────────────────────────────────
+// Select & render detail
+// ──────────────────────────────────────────
+
+async function selectContact(name) {
+  try {
+    const data = await api('GET', `/api/contacts/${encodeURIComponent(name)}`);
+    currentContact = data;
+    interactionOffset = 0;
+
+    document.getElementById('emptyState').style.display = 'none';
+    document.getElementById('detailPanel').style.display = 'block';
+
+    renderDetail();
+    renderContactList(); // highlight active
+
+    // Close mobile sidebar
+    document.getElementById('sidebar').classList.remove('mobile-open');
+  } catch (err) {
+    showToast('加载详情失败: ' + err.message, 'error');
+  }
+}
+
+function renderDetail() {
+  const c = currentContact;
+  if (!c) return;
+
+  const initial = (c.real_name || c.name)[0];
+  document.getElementById('detailAvatar').textContent = initial;
+  document.getElementById('detailName').textContent = c.name;
+
+  const parts = [];
+  if (c.department) parts.push(c.department);
+  if (c.title) parts.push(c.title);
+  if (c.external_id) parts.push(`ID: ${c.external_id.slice(0, 4)}***`);
+  document.getElementById('detailSubtitle').textContent = parts.join(' · ') || '暂无详细信息';
+
+  // Basic info
+  document.getElementById('profileBasic').innerHTML = [
+    infoRow('称呼', c.name),
+    infoRow('真名', c.real_name || '—'),
+    infoRow('部门', c.department || '—'),
+    infoRow('职级', c.title || '—'),
+    infoRow('外部 ID', c.external_id || '未绑定'),
+  ].join('');
+
+  // Stats
+  document.getElementById('profileStats').innerHTML = [
+    infoRow('总交互', `${c.total_interactions || 0} 次`),
+    infoRow('首次接触', c.first_contact ? c.first_contact.slice(0, 10) : '—'),
+    infoRow('最近联系', c.last_contact ? c.last_contact.slice(0, 10) : '—'),
+    infoRow('发出消息', (c.interactions || []).filter(i => i.direction === 'outgoing').length + ' 条'),
+    infoRow('收到回复', (c.interactions || []).filter(i => i.direction === 'incoming').length + ' 条'),
+  ].join('');
+
+  // Expertise
+  const expEl = document.getElementById('profileExpertise');
+  expEl.innerHTML = (c.expertise || []).length
+    ? c.expertise.map(e => `<span class="tag tag-cyan">${escapeHtml(e)}</span>`).join('')
+    : '<span style="font-size:13px; color:#52525b;">暂无</span>';
+
+  // Traits
+  const traitsEl = document.getElementById('profileTraits');
+  traitsEl.innerHTML = (c.traits || []).length
+    ? c.traits.map(t => `<span class="tag">${escapeHtml(t)}</span>`).join('')
+    : '<span style="font-size:13px; color:#52525b;">暂无</span>';
+
+  // Notes
+  const notesEl = document.getElementById('profileNotes');
+  notesEl.innerHTML = (c.notes || []).length
+    ? c.notes.map(n => `<div style="font-size:13px; color:#a1a1aa; padding:6px 0; border-bottom:1px solid #1f1f23;">• ${escapeHtml(n)}</div>`).join('')
+    : '<span style="font-size:13px; color:#52525b;">暂无备注</span>';
+
+  // AI Summary
+  document.getElementById('profileSummary').textContent = c.ai_summary || '龙虾还没有为这个人生成画像摘要。';
+
+  // Timeline (use embedded interactions for initial render)
+  renderTimeline(c.interactions || []);
+
+  // Merge select
+  renderMergeSelect();
+
+  // Switch to profile tab
+  switchTab('profile');
+}
+
+function infoRow(label, value) {
+  return `
+    <div style="display:flex; justify-content:space-between; font-size:13px;">
+      <span style="color:#71717a;">${label}</span>
+      <span style="color:#e4e4e7;">${escapeHtml(String(value))}</span>
+    </div>`;
+}
+
+// ──────────────────────────────────────────
+// Timeline
+// ──────────────────────────────────────────
+
+function renderTimeline(interactions) {
+  const container = document.getElementById('timelineContainer');
+  const sorted = [...interactions].sort((a, b) => b.time.localeCompare(a.time));
+
+  if (!sorted.length) {
+    container.innerHTML = '<div style="text-align:center; padding:40px; color:#52525b; font-size:14px;">暂无交互记录</div>';
+    document.getElementById('timelineLoadMore').style.display = 'none';
+    return;
+  }
+
+  container.innerHTML = sorted.map(i => {
+    const isOut = i.direction === 'outgoing';
+    const icon = isOut ? '→' : '←';
+    const label = isOut ? '发出' : '收到';
+    const colorClass = isOut ? 'outgoing' : 'incoming';
+    const time = i.time ? i.time.slice(0, 16).replace('T', ' ') : '';
+    const topics = (i.topics || []).map(t => `<span class="tag" style="font-size:10px;">${escapeHtml(t)}</span>`).join(' ');
+
+    return `
+      <div class="timeline-item ${colorClass}">
+        <div style="display:flex; align-items:center; gap:6px; margin-bottom:4px;">
+          <span style="font-size:12px; font-weight:500; color:${isOut ? '#22d3ee' : '#a78bfa'};">${icon} ${label}</span>
+          <span style="font-size:11px; color:#52525b;">${escapeHtml(time)}</span>
+        </div>
+        <p style="font-size:13px; color:#d4d4d8; line-height:1.5;">${escapeHtml(i.summary)}</p>
+        ${topics ? `<div style="margin-top:6px;">${topics}</div>` : ''}
+      </div>`;
+  }).join('');
+}
+
+async function loadMoreInteractions() {
+  if (!currentContact) return;
+  interactionOffset += INTERACTION_PAGE_SIZE;
+  try {
+    const data = await api('GET', `/api/contacts/${encodeURIComponent(currentContact.name)}/interactions?offset=${interactionOffset}&limit=${INTERACTION_PAGE_SIZE}`);
+    if (data.interactions.length) {
+      const container = document.getElementById('timelineContainer');
+      // Append
+      data.interactions.forEach(i => {
+        const isOut = i.direction === 'outgoing';
+        const icon = isOut ? '→' : '←';
+        const label = isOut ? '发出' : '收到';
+        const colorClass = isOut ? 'outgoing' : 'incoming';
+        const time = i.time ? i.time.slice(0, 16).replace('T', ' ') : '';
+        container.innerHTML += `
+          <div class="timeline-item ${colorClass}">
+            <div style="display:flex; align-items:center; gap:6px; margin-bottom:4px;">
+              <span style="font-size:12px; font-weight:500; color:${isOut ? '#22d3ee' : '#a78bfa'};">${icon} ${label}</span>
+              <span style="font-size:11px; color:#52525b;">${escapeHtml(time)}</span>
+            </div>
+            <p style="font-size:13px; color:#d4d4d8; line-height:1.5;">${escapeHtml(i.summary)}</p>
+          </div>`;
+      });
+    }
+    if (interactionOffset + INTERACTION_PAGE_SIZE >= data.total) {
+      document.getElementById('timelineLoadMore').style.display = 'none';
+    }
+  } catch (err) {
+    showToast('加载更多失败: ' + err.message, 'error');
+  }
+}
+
+// ──────────────────────────────────────────
+// Tabs
+// ──────────────────────────────────────────
+
+function switchTab(tabName) {
+  document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === tabName));
+  document.querySelectorAll('.tab-content').forEach(el => el.style.display = 'none');
+  document.getElementById(`tab-${tabName}`).style.display = 'block';
+}
+
+// ──────────────────────────────────────────
+// Create contact
+// ──────────────────────────────────────────
+
+function openCreateModal() {
+  document.getElementById('createForm').reset();
+  openModal('createModal');
+}
+
+async function submitCreate(e) {
+  e.preventDefault();
+  const form = e.target;
+  const body = {
+    name: form.name.value.trim(),
+    real_name: form.real_name.value.trim() || null,
+    department: form.department.value.trim() || null,
+    title: form.title.value.trim() || null,
+    external_id: form.external_id.value.trim() || null,
+    expertise: form.expertise.value ? form.expertise.value.split(/[,，]/).map(s => s.trim()).filter(Boolean) : [],
+    notes: form.notes.value.trim() ? [form.notes.value.trim()] : [],
+  };
+
+  if (!body.name) {
+    showToast('称呼不能为空', 'error');
+    return;
+  }
+
+  try {
+    await api('POST', '/api/contacts', body);
+    closeModal('createModal');
+    showToast(`✅ 已创建联系人: ${body.name}`);
+    await loadContacts();
+    selectContact(body.name);
+  } catch (err) {
+    showToast('创建失败: ' + err.message, 'error');
+  }
+}
+
+// ──────────────────────────────────────────
+// Edit contact
+// ──────────────────────────────────────────
+
+function openEditMode() {
+  if (!currentContact) return;
+  const c = currentContact;
+
+  document.getElementById('editName').value = c.name || '';
+  document.getElementById('editRealName').value = c.real_name || '';
+  document.getElementById('editDept').value = c.department || '';
+  document.getElementById('editTitle').value = c.title || '';
+  document.getElementById('editExternalId').value = c.external_id || '';
+  document.getElementById('editExpertise').value = (c.expertise || []).join(', ');
+  document.getElementById('editTraits').value = (c.traits || []).join(', ');
+  document.getElementById('editNotes').value = (c.notes || []).join('\n');
+  document.getElementById('editAiSummary').value = c.ai_summary || '';
+
+  openModal('editModal');
+}
+
+async function submitEdit(e) {
+  e.preventDefault();
+  if (!currentContact) return;
+
+  const form = e.target;
+  const body = {};
+
+  const newName = form.name.value.trim();
+  if (newName && newName !== currentContact.name) body.name = newName;
+  if (form.real_name.value.trim() !== (currentContact.real_name || '')) body.real_name = form.real_name.value.trim() || null;
+  if (form.department.value.trim() !== (currentContact.department || '')) body.department = form.department.value.trim() || null;
+  if (form.title.value.trim() !== (currentContact.title || '')) body.title = form.title.value.trim() || null;
+  if (form.external_id.value.trim() !== (currentContact.external_id || '')) body.external_id = form.external_id.value.trim() || null;
+
+  const newExpertise = form.expertise.value ? form.expertise.value.split(/[,，]/).map(s => s.trim()).filter(Boolean) : [];
+  body.expertise = newExpertise;
+
+  const newTraits = form.traits.value ? form.traits.value.split(/[,，]/).map(s => s.trim()).filter(Boolean) : [];
+  body.traits = newTraits;
+
+  const newNotes = form.notes.value.trim() ? form.notes.value.trim().split('\n').filter(Boolean) : [];
+  body.notes = newNotes;
+
+  body.ai_summary = form.ai_summary.value.trim() || null;
+
+  try {
+    const data = await api('PUT', `/api/contacts/${encodeURIComponent(currentContact.name)}`, body);
+    closeModal('editModal');
+    showToast('✅ 联系人已更新');
+    await loadContacts();
+    selectContact(data.contact.name);
+  } catch (err) {
+    showToast('更新失败: ' + err.message, 'error');
+  }
+}
+
+// ──────────────────────────────────────────
+// Delete contact
+// ──────────────────────────────────────────
+
+function confirmDelete() {
+  if (!currentContact) return;
+  document.getElementById('deleteName').textContent = currentContact.name;
+  openModal('deleteModal');
+}
+
+async function performDelete() {
+  if (!currentContact) return;
+  try {
+    await api('DELETE', `/api/contacts/${encodeURIComponent(currentContact.name)}`);
+    closeModal('deleteModal');
+    showToast(`🗑️ 已删除: ${currentContact.name}`);
+    currentContact = null;
+    document.getElementById('detailPanel').style.display = 'none';
+    document.getElementById('emptyState').style.display = 'flex';
+    await loadContacts();
+  } catch (err) {
+    showToast('删除失败: ' + err.message, 'error');
+  }
+}
+
+// ──────────────────────────────────────────
+// Merge contacts
+// ──────────────────────────────────────────
+
+function renderMergeSelect() {
+  const select = document.getElementById('mergeSelect');
+  const otherContacts = contacts.filter(c => c.name !== currentContact?.name);
+  select.innerHTML = otherContacts.length
+    ? otherContacts.map(c => `<option value="${escapeHtml(c.name)}">${escapeHtml(c.name)}${c.real_name ? ` (${escapeHtml(c.real_name)})` : ''}</option>`).join('')
+    : '<option disabled>没有其他联系人可合并</option>';
+}
+
+async function performMerge() {
+  if (!currentContact) return;
+  const mergeName = document.getElementById('mergeSelect').value;
+  if (!mergeName) return;
+  if (!confirm(`确定将「${mergeName}」合并到「${currentContact.name}」中吗？\n\n${mergeName} 将被删除，数据合入 ${currentContact.name}。`)) return;
+
+  try {
+    await api('POST', '/api/contacts/merge', {
+      keep_name: currentContact.name,
+      merge_name: mergeName,
+    });
+    showToast(`🔀 已合并: ${mergeName} → ${currentContact.name}`);
+    await loadContacts();
+    selectContact(currentContact.name);
+  } catch (err) {
+    showToast('合并失败: ' + err.message, 'error');
+  }
+}
+
+// ──────────────────────────────────────────
+// Search & Sort
+// ──────────────────────────────────────────
+
+let searchTimer;
+function filterContacts() {
+  clearTimeout(searchTimer);
+  searchTimer = setTimeout(loadContacts, 300);
+}
+
+function setSort(sort) {
+  currentSort = sort;
+  document.querySelectorAll('.sort-btn').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.sort === sort);
+    if (btn.dataset.sort === sort) {
+      btn.style.background = 'rgba(34, 211, 238, 0.1)';
+      btn.style.color = '#22d3ee';
+      btn.style.borderColor = 'rgba(34, 211, 238, 0.2)';
+    } else {
+      btn.style.background = '';
+      btn.style.color = '';
+      btn.style.borderColor = '';
+    }
+  });
+  loadContacts();
+}
+
+// ──────────────────────────────────────────
+// Stats
+// ──────────────────────────────────────────
+
+function renderStats() {
+  document.getElementById('statTotal').textContent = contacts.length;
+
+  const totalInteractions = contacts.reduce((sum, c) => sum + (c.total_interactions || 0), 0);
+  document.getElementById('statInteractions').textContent = totalInteractions;
+
+  const now = new Date();
+  const thisMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+  const active = contacts.filter(c => c.last_contact && c.last_contact.startsWith(thisMonth)).length;
+  document.getElementById('statActive').textContent = active;
+}
+
+// ──────────────────────────────────────────
+// Modal helpers
+// ──────────────────────────────────────────
+
+function openModal(id) {
+  document.getElementById(id).classList.add('open');
+}
+
+function closeModal(id) {
+  document.getElementById(id).classList.remove('open');
+}
+
+// Close modal on backdrop click
+document.querySelectorAll('.modal-overlay').forEach(overlay => {
+  overlay.addEventListener('click', e => {
+    if (e.target === overlay) overlay.classList.remove('open');
+  });
+});
+
+// Keyboard shortcuts
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') {
+    document.querySelectorAll('.modal-overlay.open').forEach(m => m.classList.remove('open'));
+  }
+  // Ctrl+K for search
+  if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+    e.preventDefault();
+    document.getElementById('searchInput').focus();
+  }
+});
+
+// ──────────────────────────────────────────
+// Toast
+// ──────────────────────────────────────────
+
+function showToast(message, type = 'success') {
+  const toast = document.getElementById('toast');
+  toast.textContent = message;
+  toast.className = `toast toast-${type} show`;
+  setTimeout(() => toast.classList.remove('show'), 3000);
+}
+
+// ──────────────────────────────────────────
+// Utils
+// ──────────────────────────────────────────
+
+function escapeHtml(str) {
+  if (!str) return '';
+  const div = document.createElement('div');
+  div.textContent = str;
+  return div.innerHTML;
+}
+
+// Init sort button style
+setSort('name');
+</script>
+</body>
+</html>

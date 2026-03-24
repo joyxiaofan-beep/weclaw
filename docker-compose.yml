@@ -1,0 +1,53 @@
+# 🦞 WeClaw Docker Compose — 一键启动
+#
+# 使用方法：
+#   1. 复制 .env.example 为 .env 并填入真实值
+#   2. docker compose up
+#
+# 启动 Relay + WeClaw 终端模式：
+#   docker compose up
+#
+# 只启动 Relay Server：
+#   docker compose up relay
+
+services:
+  # 🌐 Relay 中继服务器 — 龙虾互联必需
+  relay:
+    build:
+      context: ./relay_server
+      dockerfile: Dockerfile
+    ports:
+      - "${RELAY_PORT:-8900}:8900"
+    environment:
+      - RELAY_HOST=0.0.0.0
+      - RELAY_PORT=8900
+      - RELAY_MAX_LOBSTERS=${RELAY_MAX_LOBSTERS:-2000}
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import socket; s=socket.socket(); s.connect(('localhost',8900)); s.close()"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  # 🦞 WeClaw 终端模式（交互式）
+  weclaw:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    depends_on:
+      relay:
+        condition: service_healthy
+    environment:
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - OPENAI_BASE_URL=${OPENAI_BASE_URL:-}
+      - OPENAI_MODEL=${OPENAI_MODEL:-gpt-4o}
+      - RELAY_URL=ws://relay:8900
+    volumes:
+      - weclaw-data:/app/data
+    stdin_open: true
+    tty: true
+    restart: "no"
+
+volumes:
+  weclaw-data:
+    driver: local

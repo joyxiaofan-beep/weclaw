@@ -1,0 +1,124 @@
+# WeClaw 配置文件
+# 复制此文件为 config.yaml 并填入真实值
+
+# AI 模型配置
+ai:
+  provider: "openai"                 # openai / azure / local
+  api_key: "your_api_key"
+  model: "gpt-4o"
+  base_url: null                     # 自定义 API 地址（可选）
+
+# 安全配置
+security:
+  # API 访问令牌（Bearer Token）
+  api_token: "your_secret_token_here"
+
+# 持久化存储配置
+storage:
+  # SQLite 数据库路径（存储待处理消息、超时追踪、对话上下文）
+  db_path: "data/weclaw_state.db"
+
+# 行为配置
+behavior:
+  # 代发消息前是否需要确认
+  confirm_before_send: true
+  # 消息风格：formal / casual / auto
+  tone: "auto"
+  # 最大等待回复时间（小时），超过后提醒
+  reply_timeout_hours: 24
+  # 超时提醒：是否自动提醒你有未回复的消息
+  timeout_reminder_enabled: true
+  # 对话上下文窗口大小（注入 AI 的最近 N 轮对话）
+  context_window_size: 15
+  # 最大保留对话记录数（超过后自动清理旧记录）
+  max_conversation_records: 500
+
+# 🦞↔🦞 Claw-to-Claw 龙虾间通信配置
+claw2claw:
+  # 是否启用龙虾间通信
+  enabled: true
+
+  # Relay 模式配置（推荐！零配置，无需公网 IP）
+  relay_enabled: true                    # 是否使用 Relay
+  relay_url: "ws://localhost:8900"       # Relay Server 地址
+  # 公共 Relay: 如果不想自己搭，可以用公共 Relay（见 README 部署说明）
+
+  # 这只龙虾的身份
+  lobster_id: "lobster-001"          # 唯一ID（建议用 lobster-<你的名字缩写>）
+  lobster_name: "🦞 Alice的龙虾"      # 龙虾的名字
+  owner_name: "Alice"                 # 主人的名字
+
+  # HTTP 直连模式配置（高级用户，需要公网 IP / ngrok）
+  # 如果用 Relay 模式，下面可以不填
+  my_endpoint: ""                     # 留空 = 纯 Relay 模式
+  # my_endpoint: "https://lobster-alice.example.com"  # 公网地址
+  c2c_port: 8766                      # HTTP 直连监听端口
+
+  # 龙虾的能力列表
+  capabilities:
+    - name: "relay_message"
+      description: "代主人传话"
+    - name: "check_availability"
+      description: "查看主人是否方便"
+
+  # 已知的其他龙虾（也可以通过"龙虾握手"或"龙虾连接"在运行时动态添加）
+  known_peers:
+    # - lobster_id: "lobster-002"
+    #   lobster_name: "🦞 Bob的龙虾"
+    #   owner_name: "Bob"
+    #   endpoint: "relay://lobster-002"    # Relay 模式
+    #   # endpoint: "https://lobster-bob.example.com"  # HTTP 直连模式
+    #   shared_secret: "两只龙虾之间约定好的密钥"
+    #   trusted: true
+
+  # 🦞 v0.8: 龙虾画像 — 结构化自我介绍（借鉴 Tobira.ai Agent Profile）
+  agent_profile:
+    description: "Alice 的 AI 助手，擅长技术咨询和日程管理"
+    services_offered:
+      - "技术答疑"
+      - "日程管理"
+      - "代为传话"
+    services_needed:
+      - "设计协作"
+      - "翻译服务"
+    interests:
+      - "AI"
+      - "Web3"
+      - "产品设计"
+    welcome_bubbles:
+      - "你好！我是 Alice 的龙虾 🦞"
+      - "很高兴认识你！有什么可以帮你的吗？"
+    values:
+      - "开源"
+      - "协作"
+      - "效率"
+    personal_looking_for: "希望认识对 AI 和产品设计感兴趣的龙虾"
+    industries:
+      - "科技"
+      - "教育"
+    location_area: "深圳"
+    language: "zh"
+    page_public: true
+
+  # 🦞 v0.8: 龙虾行为规则 — 安全与自动化（借鉴 Tobira.ai Behavior Rules）
+  agent_behavior:
+    security:
+      protected_fields:
+        - "phone"
+        - "email"
+        - "address"
+        - "id_number"
+      block_keywords: []
+      max_messages_per_minute: 10
+    proactive:
+      enabled: false
+      discovery_interval_minutes: 30
+      auto_handshake: false
+      match_threshold: 0.6
+      max_recommendations: 5
+    filter:
+      min_trust_to_message: 0
+      block_list: []
+      require_handshake: false
+    scheduled_tasks: []
+    system_prompt_extra: ""
