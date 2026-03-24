@@ -1,226 +1,235 @@
-# 🦞 WeClaw — 龙虾社交智能代理
+**English** | [中文](README.zh-CN.md)
+
+# 🦞 WeClaw — Your Social Intelligence Agent
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![Version](https://img.shields.io/badge/version-1.0.0-green.svg)](CHANGELOG.md)
 
-> 让你的龙虾成为你与人际网络之间的智能接口。
+> Turn your lobster into the smart interface between you and your social network.
 
-## 核心理念
+## Core Philosophy
 
-WeClaw 不是一个聊天机器人，它是你的**社交代理**：
-- 📨 代你向同事发送消息（终端预览 / 龙虾互联）
-- 👂 接收回复并提炼关键信息
-- 🧠 从每次交互中学习，逐步建立人脉画像
-- 🎯 知道该找谁、怎么问、怎么整合答案
-- 💬 跟龙虾对话就是给它下指令（终端 / 龙虾互联均可）
-- ⏰ 自动追踪待回复消息，超时提醒
-- 🧵 **对话上下文**——龙虾记得"刚才说的话"，支持"他""那件事"等指代
-- 📦 **状态持久化**——重启不丢失任何待处理消息和追踪记录
-- 🛡️ **AI 降级保护**——AI 不可用时通知你，不发送垃圾消息
-- 🖥️ **终端模式**——3 分钟上手，零配置即可体验全部核心功能
-- 🦞↔🦞 **Claw-to-Claw**——你的龙虾可以直接跟朋友的龙虾对话！
-- 🌐 **Relay 零配置互联**——无需公网 IP，龙虾号+加好友码即可连接
-- 🔍 **龙虾发现**——通过标签搜索在线龙虾，拓展社交网络
-- 🤝 **好友引荐**——让好友帮你介绍新朋友，信任链传递
-- 💯 **渐进式信任**——从陌生→引荐→握手→信任→完全信任，0-100 信任分
+WeClaw is not a chatbot — it's your **social agent**:
+- 📨 Sends messages to colleagues on your behalf (terminal preview / Claw-to-Claw)
+- 👂 Receives replies and distills key information
+- 🧠 Learns from every interaction, gradually building contact profiles
+- 🎯 Knows who to ask, how to ask, and how to synthesize answers
+- 💬 Talking to your lobster = giving it instructions (terminal or C2C)
+- ⏰ Auto-tracks pending replies with timeout reminders
+- 🧵 **Conversation context** — your lobster remembers "what we just talked about", supports pronouns like "him" or "that thing"
+- 📦 **State persistence** — restarts don't lose any pending messages or tracking records
+- 🛡️ **AI fallback protection** — notifies you when AI is unavailable instead of sending garbage
+- 🖥️ **Terminal mode** — get started in 3 minutes, zero config needed for full core experience
+- 🦞↔🦞 **Claw-to-Claw** — your lobster can talk directly to your friend's lobster!
+- 🌐 **Relay zero-config networking** — no public IP needed, connect with lobster ID + friend code
+- 🔍 **Lobster discovery** — search online lobsters by tags to expand your network
+- 🤝 **Friend referrals** — ask friends to introduce new contacts, trust chain propagation
+- 💯 **Progressive trust** — from stranger → referred → handshake → trusted → fully trusted, 0-100 trust score
 
-## 快速开始
+## Quick Start
 
-### 方式一：pip install（推荐）
+### Option 1: pip install (Recommended)
 
 ```bash
 pip install weclaw
 
-# 设置 API Key
+# Set your API key
 export OPENAI_API_KEY=sk-xxxxxxxx
 
-# 启动！
+# Launch!
 weclaw
 ```
 
-### 方式二：从源码运行
+### Option 2: Run from Source
 
 ```bash
-# 安装
+# Install
 git clone https://github.com/joyxiaofan-beep/weclaw.git && cd weclaw
 pip install -r requirements.txt
 
-# 设置 API Key（任选一种方式）
-export OPENAI_API_KEY=sk-xxxxxxxx        # 方式一：环境变量
-# 或 cp config/config.terminal.yaml config/config.yaml  # 方式二：配置文件
+# Set API key (choose one)
+export OPENAI_API_KEY=sk-xxxxxxxx        # Option A: environment variable
+# or: cp config/config.terminal.yaml config/config.yaml  # Option B: config file
 
-# 启动！
+# Launch!
 python -m weclaw
 ```
 
-### 方式三：Docker Compose
+### Option 3: Docker Compose
 
 ```bash
 git clone https://github.com/joyxiaofan-beep/weclaw.git && cd weclaw
 
-# 配置环境变量
+# Configure environment
 cp .env.example .env
-# 编辑 .env 填入 OPENAI_API_KEY
+# Edit .env and fill in OPENAI_API_KEY
 
-# 一键启动（Relay + WeClaw）
+# One-command launch (Relay + WeClaw)
 docker compose up
 ```
 
-> 终端模式下消息不会真正发出，但 AI 代写、确认发送、摘要回复、自动学习等核心能力完全可用。
-> 联系人和对话数据持久化保存。
+> In terminal mode, messages aren't actually sent out, but AI drafting, send confirmation, reply summarization, and auto-learning are fully functional.
+> Contacts and conversation data are persisted across restarts.
 
-### 🦞↔🦞 龙虾互联（两只龙虾对话，5 分钟）
+### 🦞↔🦞 Claw-to-Claw (Two Lobsters Talking, 5 Minutes)
 
-**像微信加好友一样简单！** 无需公网 IP，无需 ngrok，龙虾号+加好友码即可连接：
+**As easy as adding a friend on WeChat!** No public IP, no ngrok — just lobster ID + friend code:
 
 ```bash
-# ── 终端 1：启动 Relay 中继服务器 ──
+# ── Terminal 1: Start the Relay server ──
 python relay_server/server.py
 
-# ── 终端 2：启动龙虾 A ──
+# ── Terminal 2: Start Lobster A ──
 python -m weclaw
-# 首次启动自动生成龙虾号（如: lobster_a3f7b2c1），并显示加好友码（如: #3847）
+# Auto-generates a lobster ID on first launch (e.g., lobster_a3f7b2c1) and shows a friend code (e.g., #3847)
 
-# ── 终端 3（你朋友的电脑）：启动龙虾 B ──
+# ── Terminal 3 (your friend's machine): Start Lobster B ──
 python -m weclaw
-# 输入: 龙虾加好友 #3847
-# ✅ 好友添加成功！以后重启自动互认，不需要再加好友
+# Type: add friend #3847
+# ✅ Friend added! Auto-reconnects on restart, no need to re-add
 ```
 
-> 📖 Relay Server 可以部署在任意有公网 IP 的服务器上（Docker / fly.io / 云服务器），
-> 这样两只龙虾在不同网络也能连接。详见 [Relay 部署](#relay-server-部署)。
+> 📖 The Relay Server can be deployed on any server with a public IP (Docker / fly.io / cloud VM),
+> so two lobsters on different networks can connect. See [Relay Deployment](#relay-server-deployment).
 
-📖 详细配置步骤见 [Day 1 操作指引](DAY1_GUIDE.md)
+📖 Detailed setup guide: [Day 1 Guide](DAY1_GUIDE.md)
 
-## 架构
+## Architecture
 
 ```
-你（终端）
+You (Terminal)
   │
   ▼
 ┌───────────────────────────────────────────────────────┐
-│              WeClaw 核心大脑 v1.0                       │
+│              WeClaw Core Brain v1.0                     │
 │                                                        │
 │  ┌──────────┐ ┌──────────┐ ┌────────────────────────┐ │
-│  │ 人脉记忆  │ │ AI 对话层 │ │ 🦞↔🦞 C2C 通信         │ │
-│  │  (YAML)  │ │ (OpenAI) │ │  Protocol+Client       │ │
-│  └──────────┘ └──────────┘ │  Handler+Registry      │ │
-│                             │  🌐 RelayClient (v2)   │ │
+│  │ Contact   │ │ AI Chat  │ │ 🦞↔🦞 C2C Comms        │ │
+│  │ Memory    │ │  Layer   │ │  Protocol+Client       │ │
+│  │  (YAML)  │ │ (OpenAI) │ │  Handler+Registry      │ │
+│  └──────────┘ └──────────┘ │  🌐 RelayClient (v2)   │ │
 │                             └────────────────────────┘ │
 │  ┌──────────┐ ┌──────────────────────┐                 │
-│  │ 超时追踪  │ │ 对话上下文 (SQLite)    │                 │
-│  │ (SQLite) │ │ 最近 N 轮对话 → AI    │                 │
+│  │ Timeout   │ │ Conversation Context  │                │
+│  │ Tracker  │ │ (SQLite)              │                 │
+│  │ (SQLite) │ │ Last N turns → AI     │                 │
 │  └──────────┘ └──────────────────────┘                 │
 │  ┌──────────────────────────────────┐                  │
-│  │    统一 AI 意图解析 + 快速路径     │                  │
+│  │  Unified AI Intent Parser +      │                  │
+│  │  Fast Path Router                │                  │
 │  └──────────────────────────────────┘                  │
 └──────────┬─────────────────────────┬───────────────────┘
            │                         │
            ▼                         ▼
-      终端通道                    C2C 通信层
-      (CLI)                  ┌──────────────────┐
-                   │      ▲      │  Relay 模式 (默认) │
-                同事A  同事B     │  ↕ WebSocket       │
-                                 │  ↕ 龙虾号+加好友码  │
-                                 │                    │
-                                 │  HTTP 模式 (高级)   │
-                                 │  ↕ 直连 POST       │
-                                 └────────┬───────────┘
-                                          │
-                            ┌──────────────┴──────────────┐
-                            ▼                              ▼
-                    🌐 Relay Server v2            🦞 远程龙虾 (HTTP)
-                    (WebSocket 中继)
-                    ┌──────────────┐
-                    │ 龙虾号 lobster_xx │
-                    │ 加好友码 #XXXX    │
-                    │ 好友路由(不存储)  │
-                    │ 心跳+自动清理    │
-                    └───────┬──────┘
-                            │
-                    🦞 龙虾A ↔ 🦞 龙虾B
+      Terminal                  C2C Communication
+      Channel                ┌──────────────────┐
+      (CLI)                  │  Relay Mode       │
+                             │  (default)        │
+                             │  ↕ WebSocket      │
+                             │  ↕ LobsterID +    │
+                             │    Friend Code    │
+                             │                   │
+                             │  HTTP Mode        │
+                             │  (advanced)       │
+                             │  ↕ Direct POST    │
+                             └────────┬──────────┘
+                                      │
+                        ┌─────────────┴─────────────┐
+                        ▼                            ▼
+                🌐 Relay Server v2          🦞 Remote Lobster
+                (WebSocket Relay)              (HTTP)
+                ┌──────────────┐
+                │ LobsterID     │
+                │ Friend Code   │
+                │ Route (no     │
+                │   storage)    │
+                │ Heartbeat +   │
+                │  Auto-cleanup │
+                └───────┬──────┘
+                        │
+                🦞 Lobster A ↔ 🦞 Lobster B
 ```
 
-## 功能一览
+## Features
 
-### 渐进式信任系统
+### Progressive Trust System
 
-| 分数范围 | 等级 | 含义 |
-|---------|------|------|
-| 0 | 陌生人 | 未建立任何关系 |
-| 5 | 被引荐 | 通过好友引荐认识 |
-| 10 | 已握手 | 完成龙虾握手 |
-| 50 | 默认好友 | 通过加好友码添加 |
-| 70+ | 已信任 | 可以传话、转发消息 |
-| 100 | 完全信任 | 最高信任等级 |
+| Score | Level | Meaning |
+|-------|-------|---------|
+| 0 | Stranger | No relationship established |
+| 5 | Referred | Met through friend referral |
+| 10 | Handshake | Completed lobster handshake |
+| 50 | Default Friend | Added via friend code |
+| 70+ | Trusted | Can relay and forward messages |
+| 100 | Fully Trusted | Highest trust level |
 
-### 所有命令
+### All Commands
 
-| 你说 | 龙虾做 |
-|------|--------|
-| `帮我问小王数据好了没` | 生成消息草稿 → 你确认 → 发送 |
-| `帮我跟他确认一下周五几点` | 根据上下文知道"他"是谁 |
-| `谁懂数据分析` | 查找人脉 |
-| `待办` | 查看超时未回复的消息 |
-| `发送3` | 确认发送草稿 #3 |
-| `取消3` | 取消草稿 #3 |
-| `改3 新的内容` | 修改后发送 |
-| `龙虾加好友 #1234` | 🌐 通过加好友码添加好友 |
-| `龙虾号` / `我的龙虾号` | 🌐 查看龙虾号 + 加好友码 |
-| `龙虾传话 老王 明天开会` | 🦞↔🦞 给老王的龙虾传话 |
-| `龙虾回 老王 好的收到` | 🦞↔🦞 回复老王龙虾的消息 |
-| `龙虾通讯录` | 🦞↔🦞 查看已认识的龙虾 |
-| `龙虾信任 小李` | 💯 将信任分提升到 70+ |
-| `龙虾发现 数据分析` | 🔍 按标签搜索在线龙虾 |
-| `龙虾引荐 老王 小李` | 🤝 把好友介绍给另一个好友 |
+| You Say | Lobster Does |
+|---------|-------------|
+| `Ask Xiao Wang if the data is ready` | Drafts message → you confirm → sends |
+| `Follow up with him about Friday's time` | Knows who "him" is from context |
+| `Who knows data analysis?` | Searches your contacts |
+| `Pending` | Shows timed-out unreplied messages |
+| `Send 3` | Confirms and sends draft #3 |
+| `Cancel 3` | Cancels draft #3 |
+| `Edit 3 new content` | Edits then sends |
+| `Add friend #1234` | 🌐 Adds friend via friend code |
+| `My lobster ID` | 🌐 Shows lobster ID + friend code |
+| `Relay to Lao Wang: meeting tomorrow` | 🦞↔🦞 Sends message to Lao Wang's lobster |
+| `Reply to Lao Wang: got it` | 🦞↔🦞 Replies to Lao Wang's lobster |
+| `Lobster contacts` | 🦞↔🦞 Shows known lobsters |
+| `Trust Xiao Li` | 💯 Raises trust score to 70+ |
+| `Discover data analysis` | 🔍 Searches online lobsters by tag |
+| `Refer Lao Wang to Xiao Li` | 🤝 Introduces a friend to another friend |
 
-## 配置说明
+## Configuration
 
-### 终端模式（最小配置）
+### Terminal Mode (Minimal Config)
 
 ```yaml
-# config/config.yaml（或用环境变量代替）
+# config/config.yaml (or use environment variables instead)
 ai:
-  api_key: "sk-xxxxxxxx"           # 必填
-  model: "gpt-4o"                  # 可选，默认 gpt-4o
-  # base_url: "https://api.deepseek.com/v1"  # 用第三方模型时取消注释
+  api_key: "sk-xxxxxxxx"           # Required
+  model: "gpt-4o"                  # Optional, defaults to gpt-4o
+  # base_url: "https://api.deepseek.com/v1"  # Uncomment for third-party models
 
 behavior:
-  confirm_before_send: true        # 发送前确认
-  tone: "auto"                     # 语气自动匹配
+  confirm_before_send: true        # Confirm before sending
+  tone: "auto"                     # Auto-match conversation tone
 ```
 
-### 环境变量
+### Environment Variables
 
-所有配置都可以用环境变量代替（优先级高于配置文件）：
+All settings can be configured via environment variables (takes precedence over config file):
 
-| 变量 | 说明 | 必填 |
-|------|------|------|
+| Variable | Description | Required |
+|----------|-------------|----------|
 | `OPENAI_API_KEY` | AI API Key | ✅ |
-| `OPENAI_BASE_URL` | 自定义 API 地址（国产模型必填） | |
-| `OPENAI_MODEL` | 模型名称，默认 `gpt-4o` | |
-| `RELAY_URL` | Relay Server 地址，默认 `ws://localhost:8900` | |
+| `OPENAI_BASE_URL` | Custom API endpoint (required for non-OpenAI models) | |
+| `OPENAI_MODEL` | Model name, defaults to `gpt-4o` | |
+| `RELAY_URL` | Relay Server address, defaults to `ws://localhost:8900` | |
 
-完整环境变量列表见 [.env.example](.env.example)
+Full list of environment variables: [.env.example](.env.example)
 
-### 启动方式
+### Launch Modes
 
-| 命令 | 模式 | 需要 |
-|------|------|------|
-| `weclaw` | 终端模式（含 Relay） | AI API Key + Relay Server |
-| `weclaw --no-relay` | 终端模式（无 Relay） | AI API Key |
+| Command | Mode | Requires |
+|---------|------|----------|
+| `weclaw` | Terminal mode (with Relay) | AI API Key + Relay Server |
+| `weclaw --no-relay` | Terminal mode (no Relay) | AI API Key |
 
-## Relay Server 部署
+## Relay Server Deployment
 
-**本地开发：**
+**Local development:**
 
 ```bash
 python relay_server/server.py
-# 监听 ws://0.0.0.0:8900
+# Listens on ws://0.0.0.0:8900
 ```
 
-**Docker：**
+**Docker:**
 
 ```bash
 cd relay_server
@@ -228,62 +237,62 @@ docker build -t weclaw-relay .
 docker run -p 8900:8900 weclaw-relay
 ```
 
-**Docker Compose（推荐）：**
+**Docker Compose (Recommended):**
 
 ```bash
-# Relay + WeClaw 一键启动
+# One-command launch: Relay + WeClaw
 docker compose up
 ```
 
-**Relay 环境变量：**
+**Relay Environment Variables:**
 
-| 变量 | 默认值 | 说明 |
-|------|--------|------|
-| `RELAY_HOST` | `0.0.0.0` | 监听地址 |
-| `RELAY_PORT` | `8900` | 监听端口 |
-| `RELAY_MAX_LOBSTERS` | `2000` | 最大同时在线龙虾数 |
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `RELAY_HOST` | `0.0.0.0` | Listen address |
+| `RELAY_PORT` | `8900` | Listen port |
+| `RELAY_MAX_LOBSTERS` | `2000` | Max concurrent online lobsters |
 
-## 安全设计
+## Security Design
 
-| 端点 | 鉴权方式 | 说明 |
-|------|---------|------|
-| `POST /send` | Bearer Token | 发送消息 |
-| `POST /c2c/incoming` | HMAC-SHA256 签名 | 龙虾间消息 |
-| `GET /c2c/card` | 无 | 龙虾公开名片 |
-| `GET /health` | 无 | 健康检查 |
+| Endpoint | Auth | Description |
+|----------|------|-------------|
+| `POST /send` | Bearer Token | Send message |
+| `POST /c2c/incoming` | HMAC-SHA256 Signature | Inter-lobster messages |
+| `GET /c2c/card` | None | Public lobster card |
+| `GET /health` | None | Health check |
 
-- 📊 所有日志均做脱敏处理
-- 🔐 API 响应中的用户 ID 做掩码处理
+- 📊 All logs are sanitized (PII redacted)
+- 🔐 User IDs in API responses are masked
 
-## 目录结构
+## Project Structure
 
 ```
 weclaw/
-├── config/                  # 配置文件
-│   ├── config.example.yaml  # 完整配置模板
-│   └── config.terminal.yaml # 终端模式最小配置
-├── relay_server/            # 🌐 Relay 中继服务器（独立部署）
-│   ├── server.py            # WebSocket 中继服务器 v2
-│   └── Dockerfile           # Docker 部署
-├── weclaw/                  # 核心代码
-│   ├── brain/               # AI 核心
-│   ├── channel/             # 消息通道抽象层
-│   ├── claw2claw/           # 🦞↔🦞 龙虾间通信
-│   ├── memory/              # 记忆系统
-│   ├── web/                 # Web 管理界面
-│   ├── terminal.py          # 终端引擎
-│   └── __main__.py          # 启动入口
-├── pyproject.toml           # 包元数据 & 依赖
-├── Dockerfile               # 主程序 Docker
-├── docker-compose.yml       # 一键启动
-├── .env.example             # 环境变量模板
-└── data/                    # 运行时数据（自动生成）
+├── config/                  # Configuration files
+│   ├── config.example.yaml  # Full config template
+│   └── config.terminal.yaml # Minimal terminal config
+├── relay_server/            # 🌐 Relay server (independently deployable)
+│   ├── server.py            # WebSocket relay server v2
+│   └── Dockerfile           # Docker deployment
+├── weclaw/                  # Core source code
+│   ├── brain/               # AI core
+│   ├── channel/             # Message channel abstraction
+│   ├── claw2claw/           # 🦞↔🦞 Inter-lobster communication
+│   ├── memory/              # Memory system
+│   ├── web/                 # Web management UI
+│   ├── terminal.py          # Terminal engine
+│   └── __main__.py          # Entry point
+├── pyproject.toml           # Package metadata & dependencies
+├── Dockerfile               # Main app Docker
+├── docker-compose.yml       # One-command launch
+├── .env.example             # Environment variable template
+└── data/                    # Runtime data (auto-generated)
 ```
 
-## 更新日志
+## Changelog
 
-详见 [CHANGELOG.md](CHANGELOG.md)
+See [CHANGELOG.md](CHANGELOG.md)
 
-## 许可证
+## License
 
 [MIT License](LICENSE) © 2026 WeClaw
