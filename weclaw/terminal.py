@@ -474,11 +474,13 @@ class TerminalEngine:
                 f"✅ Relay 已连接！\n"
                 f"\n"
                 f"   🦞 你的龙虾号: {_C.BOLD}{_C.CYAN}{self.my_card.lobster_id}{_C.RESET}\n"
-                f"   📋 加好友码: {_C.BOLD}{_C.CYAN}{pair_code}{_C.RESET}（一次性，加完即弃）\n"
+                f"   📋 加好友码: {_C.BOLD}{_C.CYAN}{pair_code}{_C.RESET}（面对面快捷方式，一次性）\n"
                 f"\n"
-                f"   把加好友码发给朋友，对方输入:\n"
-                f"   {_C.BOLD}龙虾加好友 {pair_code}{_C.RESET}\n"
-                f"   即可成为好友（后续按龙虾号直连，无需再加）"
+                f"   朋友可以通过龙虾号加你:\n"
+                f"   {_C.BOLD}龙虾加好友 {self.my_card.lobster_id}{_C.RESET}\n"
+                f"\n"
+                f"   面对面加好友（把加好友码发给对方）:\n"
+                f"   {_C.BOLD}龙虾加好友 {pair_code}{_C.RESET}"
             )
             return True
         else:
@@ -640,8 +642,9 @@ class TerminalEngine:
             lines.append("🦞↔🦞 龙虾互联指令：")
             if self._relay_enabled and self._relay_client and self._relay_client.connected:
                 lines.append(f"• 你的龙虾号: {_C.BOLD}{self.my_card.lobster_id}{_C.RESET}")
-                lines.append(f"• 加好友码: {_C.BOLD}{self._relay_client.pair_code}{_C.RESET}")
-                lines.append("• \"龙虾加好友 #1234\" — 通过加好友码发送好友申请")
+                lines.append(f"• 加好友码: {_C.BOLD}{self._relay_client.pair_code}{_C.RESET}（面对面快捷方式）")
+                lines.append(f"• \"龙虾加好友 claw_alice\" — 通过龙虾号发送好友申请")
+                lines.append("• \"龙虾加好友 #1234\" — 通过加好友码发送好友申请（面对面）")
             lines.append("• \"龙虾同意 Alice\" — 接受好友申请")
             lines.append("• \"龙虾拒绝 Alice\" — 拒绝好友申请")
             lines.append("• \"龙虾申请列表\" — 查看待处理的好友申请")
@@ -699,7 +702,12 @@ class TerminalEngine:
 
         # ── 🦞↔🦞 C2C 快速路径 ──
         if self.c2c_enabled:
-            # 龙虾加好友 #1234（v2 加好友码）
+            # v0.9: 龙虾加好友 claw_xxx（通过龙虾号）或 #1234（通过加好友码）
+            m = re.match(r"^龙虾加好友\s+(claw_\S+)", command)
+            if m:
+                await self._handle_relay_add_friend_by_id(m.group(1).strip())
+                return
+
             m = re.match(r"^龙虾加好友\s+#?(\d+)", command)
             if m:
                 await self._handle_relay_add_friend(f"#{m.group(1)}")
@@ -982,6 +990,35 @@ class TerminalEngine:
                 f"加好友码 {pair_code} 可能已过期或无效。\n"
                 f"请确认对方龙虾在线，且加好友码正确。\n"
                 f"💡 加好友码是一次性的，每次上线会生成新的。"
+            )
+
+    async def _handle_relay_add_friend_by_id(self, lobster_id: str):
+        """v0.9: 龙虾加好友 claw_xxx — 通过龙虾号发送好友申请"""
+        if not self._relay_client or not self._relay_client.connected:
+            await self.channel.send_to_owner(
+                "⚠️ Relay 未连接，无法加好友。\n"
+                "请先确保 Relay Server 已启动: python relay_server/server.py"
+            )
+            return
+
+        await self.channel.send_to_owner(f"🦞🔗 正在通过龙虾号 {lobster_id} 发送好友申请...")
+
+        result = await self._relay_client.add_friend_by_id(lobster_id)
+
+        if result:
+            owner_name = result.get("owner_name", "未知")
+
+            await self.channel.send_to_owner(
+                f"📬 好友申请已发送！\n\n"
+                f"等待 {owner_name} 确认...\n"
+                f"对方同意后你们就是好友了。\n\n"
+                f"💡 输入 \"{_C.BOLD}龙虾申请列表{_C.RESET}\" 查看申请状态"
+            )
+        else:
+            await self.channel.send_to_owner(
+                f"🦞🔗❌ 加好友失败\n\n"
+                f"龙虾号 {lobster_id} 对应的龙虾可能不在线或不存在。\n"
+                f"请确认龙虾号拼写正确，且对方龙虾在线。"
             )
 
     async def _handle_accept_friend(self, name: str):

@@ -5,6 +5,32 @@ All notable changes to WeClaw will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.0] - 2026-03-25
+
+### 🦞 龙虾号加好友（双模式）
+
+#### Added — 通过龙虾号发送好友申请
+- **`pair_by_id` 协议消息** — 新增服务端 `_handle_pair_by_id()` 处理器，通过龙虾号直接查找在线用户发送好友申请
+  - 直接在 `self._online` 中按龙虾号查找目标，不消耗加好友码
+  - 完整校验：不能加自己、不能重复加好友、不能重复发送待处理申请
+- **RelayClient `add_friend_by_id()`** — 客户端新增通过龙虾号加好友方法，与 `add_friend_by_code()` 共用 `_pair_result` Future 模式
+- **终端双模式命令解析** — `龙虾加好友` 命令同时支持：
+  - `龙虾加好友 claw_alice` — 通过龙虾号（主要方式）
+  - `龙虾加好友 #1234` — 通过加好友码（面对面快捷方式）
+- **SDK `add_friend()` 自动检测** — 传入 `claw_` 前缀自动走龙虾号路径，否则走加好友码路径
+  ```python
+  await claw.add_friend("claw_alice")  # 龙虾号（主要方式）
+  await claw.add_friend("#1234")       # 加好友码（面对面快捷方式）
+  ```
+
+#### Changed
+- 龙虾号从"仅用于身份标识"升级为**主要加好友方式**（类似微信号）
+- 加好友码降级为"面对面快捷方式"（类似微信面对面加好友）
+- 终端连接成功消息优先展示龙虾号加好友方式
+- README / README.zh-CN / DAY1_GUIDE 文档同步更新
+
+---
+
 ## [1.2.0] - 2026-03-24
 
 ### 🔐 好友安全升级 + 自定义龙虾号

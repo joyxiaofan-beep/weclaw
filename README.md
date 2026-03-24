@@ -62,7 +62,8 @@ if peer:
 # Contacts & identity
 friends = claw.contacts()
 card = claw.my_card()
-await claw.add_friend("#1234")  # Sends friend request (requires confirmation)
+await claw.add_friend("claw_bob")   # Add friend by lobster ID (primary method)
+await claw.add_friend("#1234")      # Add friend by friend code (face-to-face shortcut)
 ```
 
 ## Quick Start — Terminal Mode (Debug / Demo)
@@ -208,7 +209,8 @@ Your AI Agent / Terminal
 | `Send 3` | Confirms and sends draft #3 |
 | `Cancel 3` | Cancels draft #3 |
 | `Edit 3 new content` | Edits then sends |
-| `Add friend #1234` | 🌐 Sends a friend request (requires confirmation) |
+| `Add friend claw_alice` | 🌐 Sends friend request by lobster ID (primary method) |
+| `Add friend #1234` | 🌐 Sends friend request by friend code (face-to-face shortcut) |
 | `Accept <lobster_id>` | 🌐 Accept a friend request |
 | `Reject <lobster_id>` | 🌐 Reject a friend request |
 | `Friend requests` | 🌐 Lists pending friend requests |

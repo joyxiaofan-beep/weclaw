@@ -422,6 +422,100 @@ class RelayServer:
             }
         }
 
+    async def _handle_pair_by_id(self, ws, data: dict) -> dict:
+        """
+        通过龙虾号发送好友申请（需对方确认后才正式成为好友）
+
+        data: {lobster_id: "claw_alice"}
+        流程: 请求方输入龙虾号 → 服务器查找在线目标 → 发 friend_request 给目标 → 等目标确认/拒绝
+        """
+        target_lobster_id = data.get("lobster_id", "").strip()
+        if not target_lobster_id:
+            return {"type": "pair_failed", "data": {"message": "缺少目标龙虾号"}}
+
+        # 找到请求方
+        requester_id = self._ws_to_id.get(id(ws))
+        if not requester_id or requester_id not in self._online:
+            return {"type": "error", "data": {"message": "请先注册"}}
+
+        requester = self._online[requester_id]
+
+        # 通过龙虾号查找目标（必须在线）
+        target = self._online.get(target_lobster_id)
+        if not target:
+            return {
+                "type": "pair_failed",
+                "data": {"message": f"龙虾号 {target_lobster_id} 不在线或不存在"}
+            }
+
+        # 不能加自己
+        if target_lobster_id == requester_id:
+            return {"type": "pair_failed", "data": {"message": "不能加自己为好友"}}
+
+        # 已经是好友了
+        if target_lobster_id in requester.friends:
+            return {
+                "type": "pair_failed",
+                "data": {"message": f"你们已经是好友了！直接用「龙虾传话 {target.owner_name} 内容」传话吧"}
+            }
+
+        # 检查是否已有待处理的申请（避免重复发送）
+        for req in self._pending_friend_requests.values():
+            if req["requester_id"] == requester_id and req["target_id"] == target_lobster_id:
+                return {
+                    "type": "pair_failed",
+                    "data": {"message": f"你已经向 {target.owner_name} 发送过好友申请了，请等待对方确认"}
+                }
+
+        # 生成好友申请 ID
+        request_id = uuid.uuid4().hex[:12]
+
+        # 存入待审批队列
+        self._pending_friend_requests[request_id] = {
+            "requester_id": requester_id,
+            "target_id": target_lobster_id,
+            "timestamp": time.time(),
+            "requester_info": {
+                "lobster_id": requester.lobster_id,
+                "lobster_name": requester.lobster_name,
+                "owner_name": requester.owner_name,
+            },
+            "target_info": {
+                "lobster_id": target.lobster_id,
+                "lobster_name": target.lobster_name,
+                "owner_name": target.owner_name,
+            },
+        }
+
+        logger.info(
+            f"🦞📬 好友申请(龙虾号)! {requester.lobster_name}[{requester_id}] "
+            f"→ {target.lobster_name}[{target_lobster_id}] [申请ID: {request_id}]"
+        )
+
+        # 通知目标龙虾：收到好友申请（需确认）
+        await self._send_to(target.ws, {
+            "type": "friend_request",
+            "data": {
+                "request_id": request_id,
+                "lobster_id": requester.lobster_id,
+                "lobster_name": requester.lobster_name,
+                "owner_name": requester.owner_name,
+                "message": f"📬 {requester.owner_name} 的龙虾 {requester.lobster_name} 想加你为好友！",
+            }
+        })
+
+        # 返回给请求方：申请已发送，等待确认
+        return {
+            "type": "friend_request_sent",
+            "data": {
+                "request_id": request_id,
+                "lobster_id": target.lobster_id,
+                "lobster_name": target.lobster_name,
+                "owner_name": target.owner_name,
+                "message": f"已向 {target.owner_name} 发送好友申请，等待对方确认...",
+            }
+        }
+
     async def _handle_friend_accept(self, ws, data: dict) -> dict:
         """
         接受好友申请 → 双向加好友
@@ -884,6 +978,7 @@ class RelayServer:
                 handler = {
                     "register": self._handle_register,
                     "pair": self._handle_pair,
+                    "pair_by_id": self._handle_pair_by_id,  # v0.9: 通过龙虾号加好友
                     "message": self._handle_message,
                     "relay_response": self._handle_relay_response,
                     "heartbeat": self._handle_heartbeat,

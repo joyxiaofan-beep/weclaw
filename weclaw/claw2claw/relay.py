@@ -374,6 +374,45 @@ class RelayClient:
         finally:
             self._pending_responses.pop("_pending_requests_result", None)
 
+    async def add_friend_by_id(self, lobster_id: str) -> Optional[dict]:
+        """
+        通过龙虾号发送好友申请（v0.9 二次确认机制）
+
+        流程: 输入目标龙虾号 → 服务器查找目标 → 发申请给对方 → 等对方确认/拒绝
+        返回: {request_id, lobster_id, owner_name, message} 或 None（失败）
+
+        注意: 返回成功仅表示"申请已发送"，不表示已成为好友。
+              真正成为好友会通过 on_friend_added 回调通知。
+
+        Args:
+            lobster_id: 目标龙虾号（如 claw_alice）
+
+        Returns:
+            申请发送结果 dict，失败返回 None
+        """
+        if not self._connected:
+            logger.error("未连接到 Relay")
+            return None
+
+        # 创建一个 Future 等待申请发送结果
+        pair_future = asyncio.get_running_loop().create_future()
+        self._pending_responses["_pair_result"] = pair_future
+
+        msg = {
+            "type": "pair_by_id",
+            "data": {"lobster_id": lobster_id.strip()}
+        }
+        await self._send(msg)
+
+        try:
+            result = await asyncio.wait_for(pair_future, timeout=15)
+            return result
+        except asyncio.TimeoutError:
+            logger.error("发送好友申请超时")
+            return None
+        finally:
+            self._pending_responses.pop("_pair_result", None)
+
     # 兼容旧方法名
     async def pair_with_code(self, code: str) -> Optional[dict]:
         """兼容旧方法名 → add_friend_by_code"""

@@ -33,7 +33,10 @@ WeClaw 是 AI Agent 的通信协议层（"龙虾的微信"）。
     # 我的名片
     card = claw.my_card()
 
-    # 加好友
+    # 加好友（龙虾号 — 主要方式）
+    await claw.add_friend("claw_alice")
+
+    # 加好友（好友码 — 面对面快捷方式）
     await claw.add_friend("#1234")
 """
 
@@ -436,13 +439,16 @@ class WeClaw:
 
     async def add_friend(self, code: str) -> Optional[dict]:
         """
-        通过加好友码发送好友申请（v0.9: 需对方确认）。
+        发送好友申请 — 自动检测龙虾号 vs 加好友码（v0.9 双模式）。
 
-        输入对方的临时加好友码（如 #1234），申请发送后等待对方确认。
-        真正成为好友后会触发 on_friend_added 回调。
+        支持两种输入格式：
+          - 龙虾号（如 "claw_alice"）→ 通过龙虾号加好友（主要方式）
+          - 加好友码（如 "#1234"）→ 通过临时好友码加好友（面对面快捷方式）
+
+        申请发送后等待对方确认，真正成为好友后会触发 on_friend_added 回调。
 
         Args:
-            code: 加好友码（如 "#1234"）
+            code: 龙虾号（如 "claw_alice"）或加好友码（如 "#1234"）
 
         Returns:
             申请发送结果 dict（含 request_id），失败返回 None
@@ -453,16 +459,23 @@ class WeClaw:
         self._ensure_started()
 
         if not self._relay or not self._relay.connected:
-            raise RuntimeError("需要连接 Relay 才能使用加好友码")
+            raise RuntimeError("需要连接 Relay 才能加好友")
 
-        # 去掉 # 前缀
-        code = code.lstrip("#").strip()
+        code = code.strip()
         if not code:
-            logger.warning("🦞 加好友码不能为空")
+            logger.warning("🦞 加好友参数不能为空")
             return None
 
-        logger.info(f"🦞 通过加好友码 #{code} 发送好友申请...")
-        result = await self._relay.add_friend_by_code(code)
+        # 自动检测：claw_ 前缀 → 龙虾号，否则 → 加好友码
+        if code.startswith("claw_"):
+            logger.info(f"🦞 通过龙虾号 {code} 发送好友申请...")
+            result = await self._relay.add_friend_by_id(code)
+        else:
+            # 去掉 # 前缀
+            code = code.lstrip("#").strip()
+            logger.info(f"🦞 通过加好友码 #{code} 发送好友申请...")
+            result = await self._relay.add_friend_by_code(code)
+
         return result
 
     async def accept_friend(self, request_id: str) -> bool:
