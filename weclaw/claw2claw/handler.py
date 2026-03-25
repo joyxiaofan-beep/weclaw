@@ -72,11 +72,17 @@ class C2CHandler:
 
         # 收到的消息历史（内存缓存 + 可选持久化）
         self._inbox: list[dict] = []
+        self._inbox_max_size: int = 1000  # 内存中最多保留条数
         if self._store:
             self._inbox = self._store.list_c2c_inbox(limit=200)
 
         # v0.8: 速率限制器（lobster_id → [timestamp, ...])
         self._rate_limiter: dict[str, list[float]] = defaultdict(list)
+
+        # P1-4 安全修复: message_id 去重缓存（防重放攻击）
+        # key: message_id, value: 收到时间戳（用于过期清理）
+        self._seen_message_ids: dict[str, float] = {}
+        self._dedup_max_age: float = 300.0  # 与签名时间窗口一致（5 分钟）
 
     def _check_rate_limit(self, lobster_id: str) -> bool:
         """检查消息速率（v0.8），返回 True 表示超速需拦截"""
@@ -155,7 +161,7 @@ class C2CHandler:
 
         return None  # 通过
 
-    def handle(self, incoming: C2CMessage) -> C2CMessage:
+    async def handle(self, incoming: C2CMessage) -> C2CMessage:
         """
         处理一条收到的 C2C 消息
 
@@ -165,6 +171,30 @@ class C2CHandler:
         Returns:
             回复消息（ACK / handshake 回复 / query 回复）
         """
+        # P1-4 安全修复: message_id 去重（防止时间窗口内重放）
+        now = time.time()
+        # 定期清理过期条目（每次处理消息时检查）
+        expired_ids = [
+            mid for mid, ts in self._seen_message_ids.items()
+            if now - ts > self._dedup_max_age
+        ]
+        for mid in expired_ids:
+            del self._seen_message_ids[mid]
+
+        if incoming.message_id in self._seen_message_ids:
+            logger.warning(
+                f"🚫 重复消息已拒绝（防重放）: {incoming.message_id[:12]}... "
+                f"from {incoming.from_lobster_name}"
+            )
+            return C2CMessage(
+                from_lobster_id=self.my_card.lobster_id,
+                from_lobster_name=self.my_card.lobster_name,
+                msg_type="status",
+                content="重复消息已拒绝",
+                reply_to=incoming.message_id,
+            )
+        self._seen_message_ids[incoming.message_id] = now
+
         logger.info(
             f"🦞←🦞 收到 {incoming.msg_type} 消息 "
             f"from {incoming.from_lobster_name} (主人: {incoming.from_owner_name})"
@@ -198,10 +228,48 @@ class C2CHandler:
                         content="签名验证失败，消息被拒绝",
                         reply_to=incoming.message_id,
                     )
+
+                # v1.4: E2E 解密 — 验签通过后，解密 content 和 payload
+                if incoming.encrypted:
+                    try:
+                        incoming.decrypt(known_peer.shared_secret)
+                        logger.debug(f"🔓 E2E 解密成功: {incoming.msg_type} from {incoming.from_lobster_name}")
+                    except ValueError as e:
+                        logger.error(f"🔓❌ E2E 解密失败: {e}")
+                        if self._store:
+                            self._store.log_trust_event(
+                                incoming.from_lobster_id, "decrypt_fail", -10,
+                                f"E2E 解密失败: {incoming.msg_type}"
+                            )
+                        return C2CMessage(
+                            from_lobster_id=self.my_card.lobster_id,
+                            from_lobster_name=self.my_card.lobster_name,
+                            msg_type="status",
+                            content="E2E 解密失败，消息被拒绝",
+                            reply_to=incoming.message_id,
+                        )
             else:
-                logger.warning(
-                    f"⚠️ 已知龙虾 {incoming.from_lobster_name} 没有密钥，跳过签名验证"
-                )
+                # P1-1 安全修复: 已知龙虾没有密钥，只允许 handshake（用于密钥交换）
+                if incoming.msg_type != "handshake":
+                    logger.warning(
+                        f"🚫 已知龙虾 {incoming.from_lobster_name} 没有密钥，拒绝 {incoming.msg_type} 消息（仅允许 handshake）"
+                    )
+                    if self._store:
+                        self._store.log_trust_event(
+                            incoming.from_lobster_id, "no_secret_reject", -5,
+                            f"无密钥拒绝: {incoming.msg_type}"
+                        )
+                    return C2CMessage(
+                        from_lobster_id=self.my_card.lobster_id,
+                        from_lobster_name=self.my_card.lobster_name,
+                        msg_type="status",
+                        content="缺少共享密钥，请先完成密钥交换",
+                        reply_to=incoming.message_id,
+                    )
+                else:
+                    logger.info(
+                        f"🤝 已知龙虾 {incoming.from_lobster_name} 无密钥，允许 handshake 通过"
+                    )
         else:
             # 未知龙虾：只允许 handshake 类型
             if incoming.msg_type != "handshake":
@@ -363,6 +431,9 @@ class C2CHandler:
             "msg_type": "message",
         }
         self._inbox.append(inbox_entry)
+        # 防止内存无限增长：超出上限时截断旧消息
+        if len(self._inbox) > self._inbox_max_size:
+            self._inbox = self._inbox[-self._inbox_max_size:]
         if self._store:
             self._store.save_c2c_message(inbox_entry)
             # v0.7: 记录信任事件（传话成功 +2）
@@ -411,6 +482,9 @@ class C2CHandler:
             "msg_type": "query",
         }
         self._inbox.append(inbox_entry)
+        # 防止内存无限增长
+        if len(self._inbox) > self._inbox_max_size:
+            self._inbox = self._inbox[-self._inbox_max_size:]
         if self._store:
             self._store.save_c2c_message(inbox_entry)
 

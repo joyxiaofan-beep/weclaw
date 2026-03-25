@@ -25,7 +25,11 @@ v2 核心变化（对齐 Relay Server v2 协议）：
 """
 
 import asyncio
+import hashlib
+import hmac as hmac_mod
 import json
+import os
+import ssl
 import time
 from typing import Optional, Callable, Awaitable
 
@@ -39,8 +43,8 @@ from weclaw.claw2claw.protocol import (
 )
 
 
-# 默认公共 Relay 地址
-DEFAULT_RELAY_URL = "ws://localhost:8900"
+# 默认公共 Relay 地址（生产环境应使用 wss://）
+DEFAULT_RELAY_URL = "wss://localhost:8900"
 
 
 class RelayClient:
@@ -59,6 +63,7 @@ class RelayClient:
         my_card: AgentCard,
         peer_registry: PeerRegistry,
         relay_url: str = DEFAULT_RELAY_URL,
+        ssl_context: Optional[ssl.SSLContext] = None,
         on_message: Optional[Callable[[C2CMessage], Awaitable[Optional[C2CMessage]]]] = None,
         on_friend_added: Optional[Callable[[dict], Awaitable[None]]] = None,
         on_friend_request: Optional[Callable[[dict], Awaitable[None]]] = None,   # v0.9: 好友申请
@@ -71,7 +76,8 @@ class RelayClient:
         Args:
             my_card: 我的龙虾名片
             peer_registry: 通讯录（持久化好友关系）
-            relay_url: Relay Server 的 WebSocket 地址
+            relay_url: Relay Server 的 WebSocket 地址（建议 wss://）
+            ssl_context: 自定义 SSL 上下文（可选，wss:// 时自动创建默认上下文）
             on_message: 收到消息的回调 (C2CMessage) -> Optional[C2CMessage 回复]
             on_friend_added: 加好友成功的回调 (friend_info_dict) -> None
             on_friend_request: v0.9 收到好友申请的回调 (request_data) -> None
@@ -83,6 +89,7 @@ class RelayClient:
         self.my_card = my_card
         self.peers = peer_registry
         self.relay_url = relay_url
+        self._ssl_context = ssl_context
 
         self._on_message = on_message
         self._on_friend_added = on_friend_added
@@ -125,6 +132,29 @@ class RelayClient:
         """是否已连接到 Relay"""
         return self._connected
 
+    def _get_ssl_context(self) -> Optional[ssl.SSLContext]:
+        """
+        获取 SSL 上下文（用于 wss:// 连接）
+
+        优先级：
+        1. 用户显式传入的 ssl_context
+        2. wss:// URL 时自动创建默认 SSL 上下文
+        3. ws:// URL 时返回 None（并打印安全警告）
+        """
+        if self._ssl_context:
+            return self._ssl_context
+
+        if self.relay_url.startswith("wss://"):
+            return ssl.create_default_context()
+
+        # ws:// 非加密连接 — 打印安全警告
+        logger.warning(
+            "⚠️  安全警告: 使用未加密的 ws:// 连接 Relay！"
+            "通信元数据（谁和谁通信、消息大小）对网络中间人可见。"
+            "生产环境请使用 wss:// + TLS 证书。"
+        )
+        return None
+
     async def connect(self) -> bool:
         """
         连接到 Relay Server 并注册
@@ -144,8 +174,10 @@ class RelayClient:
         while self._running:
             try:
                 logger.info(f"🌐 连接 Relay: {self.relay_url}")
+                ssl_ctx = self._get_ssl_context()
                 self._ws = await websockets.connect(
                     self.relay_url,
+                    ssl=ssl_ctx,
                     ping_interval=30,
                     ping_timeout=60,
                     close_timeout=5,
@@ -230,6 +262,18 @@ class RelayClient:
                 "location_area": self.my_card.location_area,
             }
         }
+
+        # P1-3 安全修复: 注册认证（如果配置了 RELAY_AUTH_SECRET 环境变量）
+        relay_auth_secret = os.environ.get("RELAY_AUTH_SECRET", "")
+        if relay_auth_secret:
+            auth_timestamp = str(time.time())
+            auth_token = hmac_mod.new(
+                relay_auth_secret.encode(),
+                f"{self.my_card.lobster_id}|{auth_timestamp}".encode(),
+                hashlib.sha256,
+            ).hexdigest()
+            msg["data"]["auth_token"] = auth_token
+            msg["data"]["auth_timestamp"] = auth_timestamp
 
         await self._send(msg)
 
@@ -418,6 +462,35 @@ class RelayClient:
         """兼容旧方法名 → add_friend_by_code"""
         return await self.add_friend_by_code(code)
 
+    async def discover(self, tags: list[str] = None, limit: int = 10) -> None:
+        """v0.7: 发现附近的龙虾（通过 Relay 广播发现请求）"""
+        if not self._connected:
+            logger.error("未连接到 Relay，无法发现")
+            return
+        await self._send({
+            "type": "discover",
+            "data": {"tags": tags or [], "limit": limit},
+        })
+
+    async def introduce(
+        self,
+        target_lobster_id: str,
+        introduced_card: dict,
+        message: str = "",
+    ) -> None:
+        """v0.7: 好友引荐（把一个龙虾介绍给另一个龙虾）"""
+        if not self._connected:
+            logger.error("未连接到 Relay，无法引荐")
+            return
+        await self._send({
+            "type": "introduce",
+            "data": {
+                "target_id": introduced_card.get("lobster_id", ""),
+                "introduce_to_id": target_lobster_id,
+                "reason": message,
+            },
+        })
+
     async def send_via_relay(
         self,
         peer_lobster_id: str,
@@ -510,8 +583,10 @@ class RelayClient:
             await asyncio.sleep(delay)
             try:
                 import websockets
+                ssl_ctx = self._get_ssl_context()
                 self._ws = await websockets.connect(
                     self.relay_url,
+                    ssl=ssl_ctx,
                     ping_interval=30,
                     ping_timeout=60,
                 )
@@ -660,10 +735,16 @@ class RelayClient:
         friend_lobster_id = data.get("lobster_id", "")
         friend_lobster_name = data.get("lobster_name", "")
         friend_owner_name = data.get("owner_name", "")
+        friend_shared_secret = data.get("shared_secret", "")
 
-        logger.info(
-            f"🦞🤝🦞 加好友成功! {friend_lobster_name} (主人: {friend_owner_name})"
-        )
+        if friend_shared_secret:
+            logger.info(
+                f"🦞🤝🦞 加好友成功! {friend_lobster_name} (主人: {friend_owner_name}) [密钥已接收]"
+            )
+        else:
+            logger.warning(
+                f"🦞🤝🦞 加好友成功但未收到密钥! {friend_lobster_name} (主人: {friend_owner_name})"
+            )
 
         # 注册到本地通讯录（标记为通过 Relay 连接，自动信任）
         peer_info = PeerInfo(
@@ -672,6 +753,7 @@ class RelayClient:
             owner_name=friend_owner_name,
             endpoint=f"relay://{friend_lobster_id}",  # 走 relay 路由
             trusted=True,  # 通过加好友码互加，自动信任
+            shared_secret=friend_shared_secret,  # P1-6: 接收 Relay 分发的密钥
             last_seen=None,
         )
         self.peers.add_peer(peer_info)

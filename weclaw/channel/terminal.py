@@ -135,44 +135,45 @@ class TerminalChannel(BaseChannel):
             return None
 
         try:
-            # 异步读取 stdin
             loop = asyncio.get_running_loop()
-            line = await loop.run_in_executor(None, self._read_input)
+            while True:
+                # 异步读取 stdin
+                line = await loop.run_in_executor(None, self._read_input)
 
-            if line is None:
-                return None
+                if line is None:
+                    return None
 
-            line = line.strip()
-            if not line:
-                # 空输入（直接按 Enter）→ 继续等待下一次输入，不退出
-                return await self.receive()
+                line = line.strip()
+                if not line:
+                    # 空输入（直接按 Enter）→ 继续等待下一次输入，不退出
+                    continue
 
-            # 退出指令
-            if line.lower() in ("quit", "exit", "bye", "退出"):
-                _print_lobster("拜拜～我去睡觉了 💤")
-                self._running = False
-                return None
+                # 退出指令
+                if line.lower() in ("quit", "exit", "bye", "退出"):
+                    _print_lobster("拜拜～我去睡觉了 💤")
+                    self._running = False
+                    return None
 
-            # 模拟联系人回复：@小王 内容
-            if line.startswith("@") and " " in line:
-                parts = line[1:].split(" ", 1)
-                sender_name = parts[0]
-                content = parts[1]
-                _print_system(f"模拟收到 {sender_name} 的消息")
+                # 模拟联系人回复：@小王 内容
+                if line.startswith("@") and " " in line:
+                    parts = line[1:].split(" ", 1)
+                    sender_name = parts[0]
+                    content = parts[1]
+                    _print_system(f"模拟收到 {sender_name} 的消息")
+                    return ChannelMessage(
+                        sender_id=f"sim_{sender_name}",
+                        sender_name=sender_name,
+                        content=content,
+                        is_from_owner=False,
+                    )
+
+                # 普通输入 = 主人指令
                 return ChannelMessage(
-                    sender_id=f"sim_{sender_name}",
-                    sender_name=sender_name,
-                    content=content,
-                    is_from_owner=False,
+                    sender_id="terminal_owner",
+                    sender_name=self.owner_name,
+                    content=line,
+                    is_from_owner=True,
                 )
-
-            # 普通输入 = 主人指令
-            return ChannelMessage(
-                sender_id="terminal_owner",
-                sender_name=self.owner_name,
-                content=line,
-                is_from_owner=True,
-            )
 
         except (KeyboardInterrupt, EOFError):
             self._running = False

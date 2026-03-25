@@ -40,8 +40,13 @@ claw2claw:
 
   # Relay 模式配置（推荐！零配置，无需公网 IP）
   relay_enabled: true                    # 是否使用 Relay
-  relay_url: "ws://localhost:8900"       # Relay Server 地址
+  relay_url: "wss://localhost:8900"      # Relay Server 地址（推荐 wss:// 加密连接）
   # 公共 Relay: 如果不想自己搭，可以用公共 Relay（见 README 部署说明）
+  # 安全提示: 生产环境必须使用 wss://，ws:// 仅限本地开发调试
+
+  # Relay 注册认证密钥（可选，与 Relay Server 的 RELAY_AUTH_SECRET 环境变量一致）
+  # 配置后注册时需 HMAC 签名认证，防止未授权连接冒充龙虾号
+  # relay_auth_secret: ""  # 也可通过环境变量 RELAY_AUTH_SECRET 设置
 
   # 这只龙虾的身份
   lobster_id: "lobster-001"          # 唯一ID（建议用 lobster-<你的名字缩写>）

@@ -5,6 +5,58 @@ All notable changes to WeClaw will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.2] - 2026-03-25
+
+### 🛡️ P1 安全加固 — 7 项安全改进
+
+#### Security
+
+- **P1-1: 强制签名验证** — 已知龙虾无 `shared_secret` 时，拒绝所有非 `handshake` 消息（发送端 `client.py` + 接收端 `handler.py` 双重拦截），杜绝明文消息传输
+- **P1-2 + P1-6: 密钥协商机制** — 加好友成功时 Relay Server 自动生成 256-bit 密码学安全 `shared_secret`（`secrets.token_hex(32)`），通过 `friend_added` 消息分发给双方，客户端自动保存到本地通讯录
+- **P1-3: Relay 注册认证** — 新增 `RELAY_AUTH_SECRET` 环境变量，配置后注册需携带 HMAC-SHA256 签名令牌 + 5 分钟时间窗口校验，防止未授权连接冒充龙虾号
+- **P1-4: 消息去重防重放** — `C2CHandler` 新增 `_seen_message_ids` 缓存，相同 `message_id` 在 5 分钟窗口内仅处理一次，配合签名时间窗口彻底封堵重放攻击
+- **P1-5: 收件箱/对话加密存储** — `c2c_inbox` 和 `conversation_buffer` 表的 `content` 字段使用 Fernet 本地加密后存储，读取时自动解密（兼容旧明文数据），防止 SQLite 文件泄露导致消息明文暴露
+- **P1-7: HKDF salt 语义明确化** — `derive_key()` 的 `salt` 参数默认值从 `b""` 改为 `None`，消除空字节与 None 的隐式转换歧义，文档补充 HKDF 规范说明
+
+#### Changed
+- 版本号 1.4.1 → 1.4.2
+
+---
+
+## [1.4.0] - 2026-03-25
+
+### 🔐 E2E 端到端加密 — Relay 只看密文
+
+龙虾间的悄悄话，连中继服务器也听不到。
+
+#### Added — AES-256-GCM 端到端加密
+- **`weclaw/claw2claw/crypto.py`** — 全新 E2E 加密模块
+  - `CryptoEngine` 类：AES-256-GCM 对称加密 + HKDF-SHA256 密钥派生
+  - `encrypt_message_fields()` — 加密 content（文本）和 payload（JSON）
+  - `decrypt_message_fields()` — 解密并还原明文
+  - 每条消息独立随机 nonce（12 字节），杜绝重放攻击
+  - 密钥派生使用固定 salt + `weclaw-e2e-v1` info，同一 shared_secret 派生唯一 AES 密钥
+- **`C2CMessage.encrypt()` / `.decrypt()`** — 消息级加解密方法（链式调用）
+  - 新增字段：`encrypted: bool`、`e2e_nonce`、`e2e_payload_nonce`
+  - 加密后 `content` → 密文（Base64），`payload` → `{"_e2e": "密文"}`
+- **自动加密流程** — `client.py` 发送前：先 `encrypt()` 再 `sign()`（对密文签名）
+- **自动解密流程** — `handler.py` 接收后：先 `verify()` 再 `decrypt()`（验签后解密）
+- **解密失败信任事件** — 解密失败记录 `decrypt_fail` 信任事件（-10 分）
+
+#### Changed
+- `cryptography>=42.0.0` 加入核心依赖（`requirements.txt` + `pyproject.toml`）
+- 版本号 1.2.0 → 1.4.0
+
+#### Security
+- **零知识中继** — Relay Server 只转发密文，无法读取消息内容
+- **前向安全设计** — 每条消息使用独立 nonce，单条消息泄露不影响其他消息
+- **防篡改** — 加密后签名（Encrypt-then-Sign），任何篡改都会被验签拦截
+- **加密失败即拒发** — 加密失败时拒绝发送消息（不会静默降级为明文），确保零信息泄露
+- **传输层 TLS 强制** — 默认 `wss://` 加密连接，Relay Server 支持 TLS 证书配置
+- **密钥加密存储** — `shared_secret` 使用机器绑定密钥（Fernet）加密后存入 SQLite，防止本地文件泄露
+
+---
+
 ## [1.3.0] - 2026-03-25
 
 ### 🦞 龙虾号加好友（双模式）

@@ -156,8 +156,8 @@ async def main():
     # Interactive loop
     try:
         while True:
-            user_input = await asyncio.get_event_loop().run_in_executor(
-                None, lambda: input("\n🧑 You: ")
+            user_input = await asyncio.to_thread(
+                lambda: input("\n🧑 You: ")
             )
             if user_input.lower() in ("quit", "exit"):
                 break

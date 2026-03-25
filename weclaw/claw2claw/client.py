@@ -103,9 +103,28 @@ class C2CClient:
             conversation_id=conversation_id,
         )
 
-        # 签名（如果有共享密钥）
+        # E2E 加密 + 签名（如果有共享密钥）
         if peer.shared_secret:
+            # 先加密（content/payload → 密文），再签名（对密文签名）
+            # 这样 Relay 只看到密文，接收方先验签再解密
+            try:
+                msg.encrypt(peer.shared_secret)
+                logger.debug(f"🔐 E2E 加密完成: {msg.msg_type} → {peer.lobster_name}")
+            except Exception as e:
+                # P0 安全修复: 加密失败时拒绝发送，禁止静默降级为明文
+                logger.error(
+                    f"🔐❌ E2E 加密失败，消息已拒绝发送（不会以明文发送）: "
+                    f"{type(e).__name__}: {e} → {peer.lobster_name}"
+                )
+                return None
             msg.sign(peer.shared_secret)
+        else:
+            # P1-1 安全修复: 无密钥时仅允许 handshake（用于密钥交换），拒绝其他消息
+            if msg_type != "handshake":
+                logger.error(
+                    f"🚫 无共享密钥，拒绝发送 {msg_type} 消息到 {peer.lobster_name}（仅允许 handshake）"
+                )
+                return None
 
         # 根据 endpoint 选择通信模式
         if self._is_relay_peer(peer):

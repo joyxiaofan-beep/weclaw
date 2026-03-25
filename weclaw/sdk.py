@@ -864,7 +864,7 @@ class WeClaw:
         流程：Handler 过滤 → 触发用户回调 → 返回 ACK。
         """
         # 通过 Handler 处理（过滤、验签、记录）
-        reply = self._handler.handle(incoming)
+        reply = await self._handler.handle(incoming)
 
         # 触发用户注册的消息回调
         if incoming.msg_type in ("message", "query"):
@@ -936,14 +936,28 @@ class WeClaw:
         owner_name = friend_info.get("owner_name", "未知主人")
 
         if friend_id:
-            peer = PeerInfo(
-                lobster_id=friend_id,
-                lobster_name=friend_name,
-                owner_name=owner_name,
-                endpoint=f"relay://{friend_id}",
-                trusted=True,  # 通过好友确认机制加好友，自动信任（trust_score=70）
-            )
-            self._peers.add_peer(peer)
+            # 检查 relay.py._handle_friend_added() 是否已保存该好友（含 shared_secret）
+            existing = self._peers.get_peer(friend_id) if hasattr(self._peers, 'get_peer') else None
+            if existing and getattr(existing, 'shared_secret', None):
+                # relay 层已保存了带 shared_secret 的完整 PeerInfo，
+                # 仅更新信任分，不覆盖，避免丢失加密密钥
+                if existing.trust_score < 70:
+                    existing.trust_score = 70
+                    self._peers.add_peer(existing)
+                logger.debug(f"🦞 好友 {friend_id} 已由 relay 层保存（含 shared_secret），跳过覆盖")
+            else:
+                # relay 层未保存或无 shared_secret，创建新条目
+                # 尝试从 friend_info 中获取 shared_secret
+                shared_secret = friend_info.get("shared_secret", "")
+                peer = PeerInfo(
+                    lobster_id=friend_id,
+                    lobster_name=friend_name,
+                    owner_name=owner_name,
+                    endpoint=f"relay://{friend_id}",
+                    shared_secret=shared_secret,
+                    trust_score=70,  # 直接设置字段值，避免 Pydantic v2 property setter 问题
+                )
+                self._peers.add_peer(peer)
 
         # 触发好友添加成功回调（注意：这里不再错误地调用 on_friend_request）
         if self._on_friend_added_callback:

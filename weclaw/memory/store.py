@@ -18,6 +18,9 @@ from typing import Optional
 
 from loguru import logger
 
+from weclaw.claw2claw.crypto import local_encrypt, local_decrypt
+
+
 
 class StateStore:
     """
@@ -41,6 +44,9 @@ class StateStore:
             self._local.conn = sqlite3.connect(str(self.db_path))
             self._local.conn.row_factory = sqlite3.Row
             self._local.conn.execute("PRAGMA journal_mode=WAL")
+            # 追踪所有线程连接，以便 close_all() 能完整清理
+            with self._conn_lock:
+                self._all_connections.append(self._local.conn)
         return self._local.conn
 
     def _init_db(self):
@@ -191,17 +197,32 @@ class StateStore:
     # ──────────────────────────────────────────
 
     def next_id(self, counter_name: str) -> int:
-        """原子递增计数器，返回新值"""
+        """原子递增计数器，返回新值（线程安全）"""
         conn = self._conn
+        # 使用单条 UPDATE ... RETURNING 实现原子递增+读取
+        # SQLite 3.35.0+ 支持 RETURNING
+        try:
+            row = conn.execute(
+                "UPDATE counters SET value = value + 1 WHERE name = ? RETURNING value",
+                (counter_name,),
+            ).fetchone()
+            conn.commit()
+            if row:
+                return row["value"]
+        except sqlite3.OperationalError:
+            # SQLite 版本不支持 RETURNING，回退到序列化方式
+            pass
+        # 回退：用 BEGIN IMMEDIATE 确保串行化
+        conn.execute("BEGIN IMMEDIATE")
         conn.execute(
             "UPDATE counters SET value = value + 1 WHERE name = ?",
             (counter_name,),
         )
-        conn.commit()
         row = conn.execute(
             "SELECT value FROM counters WHERE name = ?",
             (counter_name,),
         ).fetchone()
+        conn.commit()
         return row["value"]
 
     # ──────────────────────────────────────────
@@ -322,13 +343,20 @@ class StateStore:
         metadata: dict = None,
     ):
         """追加一条对话记录"""
+        # P1-5 安全修复: content 加密后存储
+        try:
+            encrypted_content = local_encrypt(content)
+        except Exception:
+            logger.warning("⚠️ 本地加密失败，conversation content 将以明文存储")
+            encrypted_content = content
+
         self._conn.execute(
             """INSERT INTO conversation_buffer (role, speaker, content, timestamp, metadata)
                VALUES (?, ?, ?, ?, ?)""",
             (
                 role,
                 speaker,
-                content,
+                encrypted_content,
                 datetime.now().isoformat(),
                 json.dumps(metadata, ensure_ascii=False) if metadata else None,
             ),
@@ -348,7 +376,7 @@ class StateStore:
             entry = {
                 "role": row["role"],
                 "speaker": row["speaker"],
-                "content": row["content"],
+                "content": self._decrypt_content(row["content"]),
                 "timestamp": row["timestamp"],
             }
             if row["metadata"]:
@@ -407,6 +435,10 @@ class StateStore:
             trust_score = 70  # 旧格式 trusted=True → trust_score=70
         tags_json = json.dumps(peer_data.get("tags", []), ensure_ascii=False)
 
+        # P0 安全修复: 写入前加密 shared_secret（机器绑定密钥）
+        raw_secret = peer_data.get("shared_secret", "")
+        encrypted_secret = local_encrypt(raw_secret) if raw_secret else ""
+
         conn.execute(
             """INSERT INTO c2c_peers
                (lobster_id, lobster_name, owner_name, endpoint, shared_secret,
@@ -419,7 +451,7 @@ class StateStore:
                trust_score=?, tags=?, handle=?, introduced_by=?, description=?""",
             (
                 peer_data["lobster_id"], peer_data["lobster_name"], peer_data["owner_name"],
-                peer_data["endpoint"], peer_data.get("shared_secret", ""),
+                peer_data["endpoint"], encrypted_secret,
                 json.dumps(peer_data.get("capabilities", []), ensure_ascii=False),
                 peer_data.get("last_seen"), 1 if trust_score >= 70 else 0,
                 peer_data.get("added_at", datetime.now().isoformat()),
@@ -428,7 +460,7 @@ class StateStore:
                 peer_data.get("description", ""),
                 # UPDATE part
                 peer_data["lobster_name"], peer_data["owner_name"],
-                peer_data["endpoint"], peer_data.get("shared_secret", ""),
+                peer_data["endpoint"], encrypted_secret,
                 json.dumps(peer_data.get("capabilities", []), ensure_ascii=False),
                 peer_data.get("last_seen"), 1 if trust_score >= 70 else 0,
                 trust_score, tags_json,
@@ -453,12 +485,27 @@ class StateStore:
         for row in rows:
             keys = set(row.keys())
             trust_score = row["trust_score"] if "trust_score" in keys else (70 if row["trusted"] else 0)
+
+            # P0 安全修复: 读取后解密 shared_secret（兼容旧的明文数据）
+            raw_secret = row["shared_secret"]
+            try:
+                decrypted_secret = local_decrypt(raw_secret) if raw_secret else ""
+            except (ValueError, Exception):
+                # 兼容旧数据：如果解密失败，说明是升级前的明文存储
+                # 直接使用原值，下次 save_peer 时会自动加密
+                decrypted_secret = raw_secret
+                if raw_secret:
+                    logger.debug(
+                        f"shared_secret 解密失败（可能是升级前的明文数据），"
+                        f"将在下次保存时自动加密: {row['lobster_id']}"
+                    )
+
             result.append({
                 "lobster_id": row["lobster_id"],
                 "lobster_name": row["lobster_name"],
                 "owner_name": row["owner_name"],
                 "endpoint": row["endpoint"],
-                "shared_secret": row["shared_secret"],
+                "shared_secret": decrypted_secret,
                 "capabilities": json.loads(row["capabilities"]) if row["capabilities"] else [],
                 "last_seen": row["last_seen"],
                 "trusted": bool(row["trusted"]),
@@ -532,6 +579,14 @@ class StateStore:
 
     def save_c2c_message(self, msg_data: dict):
         """保存一条收到的 C2C 消息（v0.8: 支持 is_read / conversation_id）"""
+        # P1-5 安全修复: content 加密后存储
+        raw_content = msg_data["content"]
+        try:
+            encrypted_content = local_encrypt(raw_content)
+        except Exception:
+            logger.warning("⚠️ 本地加密失败，content 将以明文存储")
+            encrypted_content = raw_content
+
         self._conn.execute(
             """INSERT INTO c2c_inbox
                (from_lobster, from_owner, content, message_id, msg_type, received_at,
@@ -539,7 +594,7 @@ class StateStore:
                VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 msg_data["from_lobster"], msg_data["from_owner"],
-                msg_data["content"], msg_data["message_id"],
+                encrypted_content, msg_data["message_id"],
                 msg_data.get("msg_type", "message"),
                 msg_data.get("received_at", datetime.now().isoformat()),
                 msg_data.get("is_read", 0),
@@ -547,6 +602,15 @@ class StateStore:
             ),
         )
         self._conn.commit()
+
+    def _decrypt_content(self, raw: str) -> str:
+        """P1-5: 解密 content 字段，兼容旧明文数据"""
+        if not raw:
+            return raw
+        try:
+            return local_decrypt(raw)
+        except Exception:
+            return raw  # 解密失败视为旧明文数据
 
     def list_c2c_inbox(self, limit: int = 20) -> list[dict]:
         """获取最近收到的 C2C 消息（v0.8: 含 is_read / conversation_id）"""
@@ -558,7 +622,7 @@ class StateStore:
             {
                 "from_lobster": row["from_lobster"],
                 "from_owner": row["from_owner"],
-                "content": row["content"],
+                "content": self._decrypt_content(row["content"]),
                 "message_id": row["message_id"],
                 "msg_type": row["msg_type"],
                 "received_at": row["received_at"],
@@ -615,7 +679,7 @@ class StateStore:
                 "last_time": row["last_time"],
                 "total_count": row["total_count"],
                 "unread_count": row["unread_count"],
-                "last_message": latest["content"] if latest else "",
+                "last_message": self._decrypt_content(latest["content"]) if latest else "",
             })
         return threads
 
@@ -630,7 +694,7 @@ class StateStore:
             {
                 "from_lobster": row["from_lobster"],
                 "from_owner": row["from_owner"],
-                "content": row["content"],
+                "content": self._decrypt_content(row["content"]),
                 "message_id": row["message_id"],
                 "msg_type": row["msg_type"],
                 "received_at": row["received_at"],
@@ -707,7 +771,16 @@ class StateStore:
         }
 
     def close(self):
-        """关闭连接"""
+        """关闭所有线程的数据库连接"""
+        # 关闭当前线程的连接
         if hasattr(self._local, "conn") and self._local.conn:
             self._local.conn.close()
             self._local.conn = None
+        # 关闭所有已追踪的其他线程连接
+        with self._conn_lock:
+            for conn in self._all_connections:
+                try:
+                    conn.close()
+                except Exception:
+                    pass  # 连接可能已被关闭
+            self._all_connections.clear()

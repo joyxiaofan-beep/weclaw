@@ -11,6 +11,9 @@ pydantic>=2.0.0
 python-dateutil>=2.8.0
 loguru>=0.7.0
 
+# 安全 — E2E 端到端加密 (v1.4)
+cryptography>=42.0.0
+
 # AI 扩展（可选，pip install weclaw[ai]）
 # openai>=1.0.0
 # tenacity>=8.2.0

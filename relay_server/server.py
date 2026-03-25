@@ -25,13 +25,19 @@ WeClaw Relay Server — 龙虾中继服务器 v2
     RELAY_HOST: 监听地址 (默认 0.0.0.0)
     RELAY_PORT: 监听端口 (默认 8900)
     RELAY_MAX_LOBSTERS: 最大同时在线龙虾数 (默认 2000)
+    RELAY_TLS_CERT: TLS 证书文件路径 (配置后自动启用 wss://)
+    RELAY_TLS_KEY: TLS 私钥文件路径
 """
 
 import asyncio
+import hashlib
+import hmac
 import json
 import logging
 import os
 import random
+import secrets
+import ssl
 import string
 import time
 import uuid
@@ -59,6 +65,14 @@ logger = logging.getLogger("relay")
 RELAY_HOST = os.environ.get("RELAY_HOST", "0.0.0.0")
 RELAY_PORT = int(os.environ.get("RELAY_PORT", "8900"))
 MAX_LOBSTERS = int(os.environ.get("RELAY_MAX_LOBSTERS", "2000"))
+
+# TLS 证书配置（可选，配置后自动启用 wss://）
+RELAY_TLS_CERT = os.environ.get("RELAY_TLS_CERT", "")  # TLS 证书文件路径
+RELAY_TLS_KEY = os.environ.get("RELAY_TLS_KEY", "")    # TLS 私钥文件路径
+
+# P1-3 安全修复: 注册认证密钥（可选，设置后注册需 HMAC 签名认证）
+# 客户端和 Relay 共享此密钥，防止未授权连接
+RELAY_AUTH_SECRET = os.environ.get("RELAY_AUTH_SECRET", "")
 
 # 临时配对码有效期（秒）— 仅加好友用，加完即弃
 PAIR_CODE_TTL = 10 * 60  # 10 分钟（更短，因为只用一次）
@@ -125,11 +139,17 @@ class RelayServer:
         生成临时加好友码: #XXXX
 
         短、好记、只用一次。类似微信面对面加好友的 4 位数。
+        最多尝试 100 次，避免所有码被占满时无限循环。
         """
-        while True:
+        max_attempts = 100
+        for _ in range(max_attempts):
             code = "#" + "".join(random.choices(string.digits, k=4))
             if code not in self._pair_codes:
                 return code
+        # 所有 4 位码几乎用尽，扩展到 6 位
+        logger.warning("⚠️ 4位加好友码接近用尽，回退到6位码")
+        code = "#" + "".join(random.choices(string.digits, k=6))
+        return code
 
     async def _cleanup_expired_codes(self):
         """定期清理过期的临时加好友码"""
@@ -172,13 +192,15 @@ class RelayServer:
                 # 通知请求方申请已过期
                 requester = self._online.get(req["requester_id"])
                 if requester:
+                    target_info = req.get("target_info", {})
+                    target_owner = target_info.get("owner_name", "未知")
                     await self._send_to(requester.ws, {
                         "type": "friend_request_result",
                         "data": {
                             "success": False,
-                            "lobster_id": req["target_id"],
-                            "owner_name": req["target_info"]["owner_name"],
-                            "message": f"⏰ 向 {req['target_info']['owner_name']} 的好友申请已过期（超过24小时未处理）",
+                            "lobster_id": req.get("target_id", ""),
+                            "owner_name": target_owner,
+                            "message": f"⏰ 向 {target_owner} 的好友申请已过期（超过24小时未处理）",
                         }
                     })
             if expired:
@@ -214,11 +236,13 @@ class RelayServer:
             )
 
     async def _send_to(self, ws, message: dict):
-        """安全地发送消息"""
+        """安全地发送消息，记录发送失败"""
         try:
             await ws.send(json.dumps(message, ensure_ascii=False))
-        except Exception:
-            pass
+        except Exception as e:
+            # 记录错误而非静默吞掉，便于排查连接问题
+            lobster_id = self._ws_to_id.get(id(ws), "unknown")
+            logger.warning(f"🦞⚠️ 发送消息到 {lobster_id} 失败: {type(e).__name__}: {e}")
 
     # ──────────────────────────────────────────
     # 协议处理
@@ -246,6 +270,27 @@ class RelayServer:
         # v0.9: 龙虾号格式校验（兼容旧格式 lobster_ 前缀）
         if not (lobster_id.startswith("claw_") or lobster_id.startswith("lobster_")):
             return {"type": "error", "data": {"message": "龙虾号格式无效，需以 claw_ 开头"}}
+
+        # P1-3 安全修复: 注册认证（如果配置了 RELAY_AUTH_SECRET）
+        if RELAY_AUTH_SECRET:
+            auth_token = data.get("auth_token", "")
+            auth_timestamp = data.get("auth_timestamp", "")
+            if not auth_token or not auth_timestamp:
+                return {"type": "error", "data": {"message": "注册需要认证令牌（缺少 auth_token / auth_timestamp）"}}
+            # 验证时间窗口（5 分钟内有效）
+            try:
+                ts = float(auth_timestamp)
+                if abs(time.time() - ts) > 300:
+                    return {"type": "error", "data": {"message": "认证令牌已过期"}}
+            except (ValueError, TypeError):
+                return {"type": "error", "data": {"message": "认证时间戳无效"}}
+            # 验证 HMAC 签名: HMAC-SHA256(lobster_id|timestamp, secret)
+            expected = hmac.new(
+                RELAY_AUTH_SECRET.encode(), f"{lobster_id}|{auth_timestamp}".encode(), hashlib.sha256
+            ).hexdigest()
+            if not hmac.compare_digest(auth_token, expected):
+                logger.warning(f"🚫 注册认证失败: {lobster_id}")
+                return {"type": "error", "data": {"message": "注册认证失败"}}
 
         # 重连处理
         if lobster_id in self._online:
@@ -556,12 +601,16 @@ class RelayServer:
         # 删除已处理的申请
         del self._pending_friend_requests[request_id]
 
+        # P1-6 安全修复: 生成 shared_secret 并分发给双方
+        # 使用密码学安全随机数生成 32 字节（256 位）密钥
+        shared_secret = secrets.token_hex(32)  # 64 字符 hex 字符串
+
         logger.info(
             f"🦞🤝🦞 好友申请通过! {request['requester_info']['lobster_name']}[{requester_id}] "
-            f"↔ {accepter.lobster_name}[{accepter_id}]"
+            f"↔ {accepter.lobster_name}[{accepter_id}] [密钥已分发]"
         )
 
-        # 通知请求方：好友申请被接受
+        # 通知请求方：好友申请被接受 + shared_secret
         if requester:
             await self._send_to(requester.ws, {
                 "type": "friend_added",
@@ -569,17 +618,19 @@ class RelayServer:
                     "lobster_id": accepter.lobster_id,
                     "lobster_name": accepter.lobster_name,
                     "owner_name": accepter.owner_name,
+                    "shared_secret": shared_secret,
                     "message": f"🎉 {accepter.owner_name} 接受了你的好友申请！",
                 }
             })
 
-        # 返回给接受方：确认好友添加成功
+        # 返回给接受方：确认好友添加成功 + shared_secret
         return {
             "type": "friend_added",
             "data": {
                 "lobster_id": request["requester_info"]["lobster_id"],
                 "lobster_name": request["requester_info"]["lobster_name"],
                 "owner_name": request["requester_info"]["owner_name"],
+                "shared_secret": shared_secret,
                 "message": f"已和 {request['requester_info']['owner_name']} 成为好友！",
             }
         }
@@ -618,9 +669,14 @@ class RelayServer:
         # 删除已处理的申请
         del self._pending_friend_requests[request_id]
 
+        # 安全获取拒绝者信息（防止 TOCTOU: 并发下线导致 KeyError）
+        rejecter = self._online.get(rejecter_id)
+        rejecter_name = rejecter.lobster_name if rejecter else "未知"
+        rejecter_owner = rejecter.owner_name if rejecter else "未知"
+
         logger.info(
             f"🦞❌ 好友申请被拒! {request['requester_info']['lobster_name']}[{requester_id}] "
-            f"→ {self._online[rejecter_id].lobster_name}[{rejecter_id}]"
+            f"→ {rejecter_name}[{rejecter_id}]"
         )
 
         # 通知请求方：好友申请被拒绝
@@ -630,8 +686,8 @@ class RelayServer:
                 "data": {
                     "success": False,
                     "lobster_id": rejecter_id,
-                    "owner_name": self._online[rejecter_id].owner_name,
-                    "message": f"😞 {self._online[rejecter_id].owner_name} 拒绝了你的好友申请",
+                    "owner_name": rejecter_owner,
+                    "message": f"😞 {rejecter_owner} 拒绝了你的好友申请",
                 }
             })
 
@@ -1012,7 +1068,21 @@ class RelayServer:
     async def run(self):
         """启动 Relay Server"""
         logger.info("🦞🌐 WeClaw Relay Server v2.2 启动中...")
-        logger.info(f"   📡 地址: ws://{RELAY_HOST}:{RELAY_PORT}")
+        # TLS 配置
+        ssl_context = None
+        protocol = "ws"
+        if RELAY_TLS_CERT and RELAY_TLS_KEY:
+            ssl_context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+            ssl_context.load_cert_chain(RELAY_TLS_CERT, RELAY_TLS_KEY)
+            protocol = "wss"
+            logger.info(f"   🔒 TLS: 已启用 (证书: {RELAY_TLS_CERT})")
+        else:
+            logger.warning(
+                "   ⚠️  TLS 未配置！使用未加密的 ws:// 连接。"
+                "生产环境请设置 RELAY_TLS_CERT 和 RELAY_TLS_KEY 环境变量。"
+            )
+
+        logger.info(f"   📡 地址: {protocol}://{RELAY_HOST}:{RELAY_PORT}")
         logger.info(f"   🦞 最大在线: {MAX_LOBSTERS}")
         logger.info(f"   🔍 发现协议: 已启用 (v0.7)")
         logger.info(f"   🤝 好友确认: 已启用 (v0.9)")
@@ -1026,6 +1096,7 @@ class RelayServer:
             self.handle_connection,
             RELAY_HOST,
             RELAY_PORT,
+            ssl=ssl_context,
             ping_interval=HEARTBEAT_INTERVAL,
             ping_timeout=HEARTBEAT_INTERVAL * 2,
         ):
