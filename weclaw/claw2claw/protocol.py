@@ -294,12 +294,12 @@ class C2CMessage(BaseModel):
         # 时间窗口校验：防重放攻击
         try:
             msg_time = datetime.fromisoformat(self.timestamp)
-            # 确保两端时区一致：统一使用 UTC 比较
-            from datetime import timezone
-            now = datetime.now(timezone.utc)
-            # 如果消息时间戳无时区信息，假设为 UTC
-            if msg_time.tzinfo is None:
-                msg_time = msg_time.replace(tzinfo=timezone.utc)
+            # 统一用本地 naive datetime 比较（因为 timestamp 由 datetime.now() 生成，无时区信息）
+            # 避免将本地时间误判为 UTC 导致时区偏移
+            if msg_time.tzinfo is not None:
+                # 如果 timestamp 带时区信息，先转成本地时间再去掉时区
+                msg_time = msg_time.astimezone().replace(tzinfo=None)
+            now = datetime.now()  # 本地 naive datetime，与 timestamp 对齐
             age = abs((now - msg_time).total_seconds())
             if age > max_age_seconds:
                 return False

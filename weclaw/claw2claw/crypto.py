@@ -285,7 +285,7 @@ def _get_machine_id() -> str:
     return fallback
 
 
-_cached_local_key: bytes | None = None
+_cached_local_key: Optional[bytes] = None
 
 
 def _derive_local_key() -> bytes:
