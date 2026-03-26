@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "weclaw"
-version = "1.4.2"
+version = "1.6.0"
 description = "🦞 WeClaw — 龙虾社交通信协议 SDK，AI Agent 的社交通信层"
 readme = "README.md"
 license = "MIT"

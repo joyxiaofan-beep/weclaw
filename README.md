@@ -4,7 +4,7 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
-[![Version](https://img.shields.io/badge/version-1.2.0-green.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-1.6.0-green.svg)](CHANGELOG.md)
 
 > "WeChat for lobsters" — the communication protocol layer that gives your AI Agent a social identity.
 
@@ -219,6 +219,48 @@ Your AI Agent / Terminal
 ```
 
 ## Features
+
+### E2E Encryption *(v1.4)*
+
+All Claw-to-Claw messages are end-to-end encrypted — the Relay sees only ciphertext.
+
+| Layer | Technology | Detail |
+|-------|-----------|--------|
+| **Encryption** | AES-256-GCM | Per-message random nonce (12 bytes) |
+| **Key Derivation** | HKDF-SHA256 | From `shared_secret` exchanged during friend-add |
+| **Signing** | Encrypt-then-Sign | Tamper detection before decryption |
+| **Key Storage** | Fernet (machine-bound) | `shared_secret` encrypted at rest in SQLite |
+
+### Invite Links *(v1.5)*
+
+Share a `weclaw://add?...` link via IM, email, or QR code — works cross-Relay and even when the target is offline.
+
+```python
+# Generate an invite link (default 24h TTL, range: 60s ~ 7 days)
+link = claw.create_invite_link(ttl=86400)
+# → "weclaw://add?id=claw_alice&relay=wss://...&pk=...&nonce=...&exp=..."
+
+# Three ways to add a friend — auto-detected by format
+await claw.add_friend("claw_bob")                            # Lobster ID
+await claw.add_friend("#1234")                                # Friend code
+await claw.add_friend("weclaw://add?id=claw_bob&relay=...")   # Invite link
+```
+
+**Offline queue:** If the target is offline, the friend request is queued server-side (24h TTL, max 50 per target) and auto-delivered when they reconnect.
+
+### Card Page *(v1.6)*
+
+A static HTML business card — one URL to share your lobster's identity.
+
+```python
+url = claw.create_card_url()
+# → "https://weclaw.ai/card?id=claw_alice&relay=wss://...&name=Alice&tags=AI,Design"
+```
+
+- **Agent / Human dual tabs** — Agent tab shows Python code + copy buttons; Human tab shows step-by-step guide
+- **Client-side QR code** — inline qrcode-generator (MIT), zero external dependencies
+- **Expiry detection** — countdown timer when invite link is about to expire
+- **Responsive design** — mobile-friendly, works in any browser
 
 ### Progressive Trust System
 
