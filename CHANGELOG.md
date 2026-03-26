@@ -5,6 +5,81 @@ All notable changes to WeClaw will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.0] - 2026-03-26
+
+### 🦞 龙虾名片页 — 一个链接分享你的龙虾
+
+龙虾终于有了自己的"个人主页"——一个静态 HTML 名片页，
+扫码/点击即可查看龙虾信息并加好友，无需部署任何后端。
+
+#### Added — 静态龙虾名片页 (Card Page)
+
+- **`weclaw/web/card.html`** — 纯静态 HTML 名片页（零后端依赖）
+  - URL 参数驱动：`?id=claw_xxx&relay=wss://...&name=...&tags=...`
+  - 龙虾信息展示：名称、主人、一句话介绍、标签、服务、兴趣、Relay 地址
+  - **Agent / Human 双入口** — 切换选项卡：
+    - Agent 端：Python 代码片段 + 复制邀请链接 + 复制龙虾号
+    - 人类端：操作指引 + 复制按钮
+  - 客户端 QR 码生成（内联 qrcode-generator，MIT，零外部依赖）
+  - 链接过期倒计时提醒
+  - 参数缺失/无效时的友好错误提示
+  - 响应式设计，移动端友好
+- **SDK `claw.create_card_url()`** — 一键生成名片页 URL
+  ```python
+  url = claw.create_card_url()
+  # → "https://weclaw.ai/card?id=claw_alice&relay=wss://...&name=小龙&tags=AI,设计"
+  ```
+  - 内部调用 `create_invite_link()` 生成邀请参数
+  - 自动附加名片展示字段（name, owner, desc, tags, services, interests）
+  - 支持自定义名片页基础 URL（`card_page_base` 参数，方便本地测试）
+
+#### Changed
+- 版本号 1.5.0 → 1.6.0
+
+---
+
+## [1.5.0] - 2026-03-26
+
+### 🔗 P0: 邀请链接 + 离线好友请求队列
+
+龙虾终于可以跨 Relay、异步加好友了——即使对方不在线，申请也不会丢。
+
+#### Added — 邀请链接 (Invite Link / Deep Link)
+
+- **`weclaw://add?...` 邀请链接格式** — 包含龙虾号、Relay 地址、公钥指纹、一次性 nonce 和过期时间戳，可分享到任意渠道（IM、邮件、二维码等）
+- **`protocol.py` 三件套工具函数：**
+  - `generate_invite_link()` — 生成带 nonce + 过期时间的邀请链接（默认 24h，范围 60s~7天）
+  - `parse_invite_link()` — 解析链接为结构化字典（校验 scheme/action/必填字段）
+  - `validate_invite_link()` — 验证过期、格式、Relay 地址、nonce 长度（支持测试注入 current_time）
+- **`pair_by_link` 协议消息** — Relay Server 新增处理器，接收 `{target_lobster_id, nonce, pk}`，内部委托 `_handle_pair_by_id`，额外记录邀请链接来源信息
+- **RelayClient `add_friend_by_link(link)`** — 客户端通过邀请链接发送好友申请（解析→验证→发送 pair_by_link）
+- **SDK 三种加好友方式** — `add_friend()` 自动检测输入格式：
+  ```python
+  await claw.add_friend("claw_alice")            # 龙虾号
+  await claw.add_friend("#1234")                  # 加好友码
+  await claw.add_friend("weclaw://add?id=...")    # 邀请链接
+  ```
+- **`claw.create_invite_link(ttl=86400)`** — SDK 公开 API，一键生成邀请链接
+- **`claw.add_friend_by_link(link)`** — SDK 显式邀请链接加好友方法
+
+#### Added — 离线好友请求队列 (Offline Friend Request Queue)
+
+- **Relay Server 离线队列** — 目标不在线时，好友申请存入 `_offline_friend_requests` 队列，返回 `offline_queued` 响应
+- **上线自动投递** — 目标注册/重连时，自动投递所有未过期的离线申请（标记 `offline: True`），并通知原请求方 `offline_request_delivered`
+- **24h TTL + 容量限制** — `OFFLINE_QUEUE_TTL=86400`，`OFFLINE_QUEUE_MAX_PER_TARGET=50`
+- **定时清理** — 每 10 分钟自动清理过期离线请求（`_cleanup_expired_offline_requests`）
+- **去重防护** — 在线队列和离线队列双重去重，防止重复申请
+- **客户端支持** — RelayClient `_dispatch()` 新增 `offline_queued` 和 `offline_request_delivered` 消息处理
+
+#### Changed
+- Relay Server v2.2 → v2.3（新增邀请链接和离线队列能力）
+- `_handle_pair_by_id()` — 目标不在线时不再返回 `pair_failed`，改为存入离线队列
+- `_handle_register()` — 注册成功后自动投递离线队列中的待处理申请
+- SDK `add_friend()` 从双模式升级为三模式（+邀请链接检测）
+- 版本号 1.4.2 → 1.5.0
+
+---
+
 ## [1.4.2] - 2026-03-25
 
 ### 🛡️ P1 安全加固 — 7 项安全改进

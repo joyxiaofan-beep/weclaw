@@ -40,6 +40,8 @@ from weclaw.claw2claw.protocol import (
     C2CMessage,
     PeerInfo,
     PeerRegistry,
+    parse_invite_link,
+    validate_invite_link,
 )
 
 
@@ -457,6 +459,63 @@ class RelayClient:
         finally:
             self._pending_responses.pop("_pair_result", None)
 
+    async def add_friend_by_link(self, link: str) -> Optional[dict]:
+        """
+        通过邀请链接发送好友申请（跨 Relay、异步加好友）
+
+        流程: 解析链接 → 校验有效性 → 发送 pair_by_link 给 Relay → 等待结果
+        返回: {request_id, lobster_id, message, ...} 或 None（失败）
+
+        支持的结果:
+          - friend_request_sent — 对方在线，申请已发送
+          - offline_queued — 对方不在线，申请已加入离线队列
+
+        Args:
+            link: 邀请链接 (weclaw://add?id=...&relay=...&nonce=...&exp=...)
+
+        Returns:
+            结果 dict，失败返回 None
+        """
+        if not self._connected:
+            logger.error("未连接到 Relay")
+            return None
+
+        # 1. 解析邀请链接
+        try:
+            link_data = parse_invite_link(link)
+        except ValueError as e:
+            logger.error(f"邀请链接格式错误: {e}")
+            return None
+
+        # 2. 验证有效性（过期、格式等）
+        valid, reason = validate_invite_link(link_data)
+        if not valid:
+            logger.error(f"邀请链接无效: {reason}")
+            return None
+
+        # 3. 发送 pair_by_link 消息
+        pair_future = asyncio.get_running_loop().create_future()
+        self._pending_responses["_pair_result"] = pair_future
+
+        msg = {
+            "type": "pair_by_link",
+            "data": {
+                "target_lobster_id": link_data["id"],
+                "nonce": link_data["nonce"],
+                "pk": link_data.get("pk", ""),
+            }
+        }
+        await self._send(msg)
+
+        try:
+            result = await asyncio.wait_for(pair_future, timeout=15)
+            return result
+        except asyncio.TimeoutError:
+            logger.error("通过邀请链接发送好友申请超时")
+            return None
+        finally:
+            self._pending_responses.pop("_pair_result", None)
+
     # 兼容旧方法名
     async def pair_with_code(self, code: str) -> Optional[dict]:
         """兼容旧方法名 → add_friend_by_code"""
@@ -641,6 +700,19 @@ class RelayClient:
             fut = self._pending_responses.pop("_pending_requests_result", None)
             if fut and not fut.done():
                 fut.set_result(msg_data.get("requests", []))
+
+        elif msg_type == "offline_queued":
+            # 目标不在线，好友申请已加入离线队列
+            pair_future = self._pending_responses.pop("_pair_result", None)
+            if pair_future and not pair_future.done():
+                pair_future.set_result(msg_data)
+            target = msg_data.get("target_lobster_id", "")
+            logger.info(f"📭 好友申请已排队: {target} 当前不在线，上线后自动投递")
+
+        elif msg_type == "offline_request_delivered":
+            # 之前排队的离线好友申请已投递给目标
+            target = msg_data.get("target_lobster_id", "")
+            logger.info(f"📬 离线好友申请已投递: {target} 已上线并收到你的申请")
 
         elif msg_type == "pair_failed":
             # 加好友失败

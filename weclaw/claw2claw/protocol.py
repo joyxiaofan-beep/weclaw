@@ -30,10 +30,12 @@ Agent Behavior = 龙虾行为规则
 import hashlib
 import hmac
 import re
+import secrets
 import time
 import uuid
 from datetime import datetime
-from typing import Optional
+from typing import Optional, Dict, Tuple
+from urllib.parse import urlencode, urlparse, parse_qs
 
 from pydantic import BaseModel, Field
 
@@ -735,3 +737,169 @@ def generate_lobster_id() -> str:
     用于用户未自定义时的自动生成。
     """
     return f"{LOBSTER_ID_PREFIX}{uuid.uuid4().hex[:8]}"
+
+
+# ──────────────────────────────────────────
+# 邀请链接工具函数 (v1.5)
+# ──────────────────────────────────────────
+#
+# 邀请链接让龙虾可以跨 Relay、跨时区异步加好友。
+# URL 格式: weclaw://add?id=claw_xxx&relay=wss://relay.example.com&pk=<fingerprint>&nonce=<random>&exp=<timestamp>
+#
+# 包含信息:
+#   - id:    邀请方的龙虾号
+#   - relay: 邀请方所在的 Relay Server 地址
+#   - pk:    邀请方的公钥指纹（用于后续 E2E 加密握手验证）
+#   - nonce: 随机数（防重放 + 标识唯一邀请）
+#   - exp:   过期时间戳（秒级 Unix timestamp）
+
+INVITE_LINK_SCHEME = "weclaw"
+INVITE_LINK_ACTION = "add"
+INVITE_LINK_DEFAULT_TTL = 86400  # 默认 24 小时
+
+
+def generate_invite_link(
+    lobster_id: str,
+    relay_url: str,
+    public_key_fingerprint: str = "",
+    ttl: int = INVITE_LINK_DEFAULT_TTL,
+) -> str:
+    """
+    生成邀请链接。
+
+    Args:
+        lobster_id: 邀请方的龙虾号 (如 claw_alice)
+        relay_url: 邀请方所在 Relay Server 地址 (如 wss://relay.example.com)
+        public_key_fingerprint: 邀请方公钥指纹（可选，用于 E2E 握手验证）
+        ttl: 链接有效期（秒），默认 24 小时
+
+    Returns:
+        邀请链接字符串，如:
+        weclaw://add?id=claw_alice&relay=wss://relay.example.com&pk=abc123&nonce=deadbeef&exp=1711500000
+
+    Raises:
+        ValueError: 龙虾号格式不合法或 ttl 不合理
+    """
+    # 校验龙虾号
+    if not lobster_id.startswith(LOBSTER_ID_PREFIX):
+        raise ValueError(f"龙虾号必须以 '{LOBSTER_ID_PREFIX}' 开头，收到: {lobster_id}")
+
+    if ttl < 60:
+        raise ValueError(f"邀请链接有效期至少 60 秒，收到: {ttl}")
+
+    if ttl > 7 * 86400:
+        raise ValueError(f"邀请链接有效期最多 7 天，收到: {ttl}")
+
+    nonce = secrets.token_hex(16)  # 32 字符随机数
+    exp = int(time.time()) + ttl
+
+    params = {
+        "id": lobster_id,
+        "relay": relay_url,
+        "pk": public_key_fingerprint,
+        "nonce": nonce,
+        "exp": str(exp),
+    }
+
+    return f"{INVITE_LINK_SCHEME}://{INVITE_LINK_ACTION}?{urlencode(params)}"
+
+
+def parse_invite_link(link: str) -> Dict[str, str]:
+    """
+    解析邀请链接为结构化字典。
+
+    Args:
+        link: 邀请链接字符串
+
+    Returns:
+        包含以下键的字典:
+        - id:    龙虾号
+        - relay: Relay Server 地址
+        - pk:    公钥指纹
+        - nonce: 随机数
+        - exp:   过期时间戳（字符串）
+
+    Raises:
+        ValueError: 链接格式不合法
+    """
+    parsed = urlparse(link)
+
+    if parsed.scheme != INVITE_LINK_SCHEME:
+        raise ValueError(
+            f"邀请链接协议错误: 期望 '{INVITE_LINK_SCHEME}://', "
+            f"收到 '{parsed.scheme}://'"
+        )
+
+    # urlparse 把 weclaw://add?... 的 "add" 放在 netloc
+    action = parsed.netloc or parsed.path.lstrip("/")
+    if action != INVITE_LINK_ACTION:
+        raise ValueError(
+            f"邀请链接动作错误: 期望 '{INVITE_LINK_ACTION}', 收到 '{action}'"
+        )
+
+    qs = parse_qs(parsed.query, keep_blank_values=True)
+
+    # 提取必填字段
+    required_fields = ["id", "relay", "nonce", "exp"]
+    result = {}
+
+    for field_name in required_fields:
+        values = qs.get(field_name, [])
+        if not values or not values[0]:
+            raise ValueError(f"邀请链接缺少必填字段: {field_name}")
+        result[field_name] = values[0]
+
+    # pk 是可选的
+    pk_values = qs.get("pk", [""])
+    result["pk"] = pk_values[0] if pk_values else ""
+
+    return result
+
+
+def validate_invite_link(
+    link_data: Dict[str, str],
+    current_time: Optional[float] = None,
+) -> Tuple[bool, str]:
+    """
+    验证已解析的邀请链接数据是否有效。
+
+    Args:
+        link_data: 由 parse_invite_link() 返回的字典
+        current_time: 当前时间戳（可选，默认用 time.time()，方便测试注入）
+
+    Returns:
+        (is_valid, reason) — 有效时 reason 为空字符串
+    """
+    if current_time is None:
+        current_time = time.time()
+
+    # 1. 检查必填字段
+    for field_name in ("id", "relay", "nonce", "exp"):
+        if field_name not in link_data or not link_data[field_name]:
+            return False, f"缺少必填字段: {field_name}"
+
+    # 2. 检查龙虾号格式
+    lobster_id = link_data["id"]
+    if not lobster_id.startswith(LOBSTER_ID_PREFIX):
+        return False, f"龙虾号格式错误: 必须以 '{LOBSTER_ID_PREFIX}' 开头"
+
+    # 3. 检查过期时间
+    try:
+        exp = int(link_data["exp"])
+    except (ValueError, TypeError):
+        return False, f"过期时间格式错误: {link_data['exp']}"
+
+    if exp <= current_time:
+        return False, f"邀请链接已过期（过期于 {datetime.fromtimestamp(exp)}）"
+
+    # 4. 检查 relay 地址格式
+    relay = link_data["relay"]
+    if not relay.startswith(("ws://", "wss://")):
+        return False, f"Relay 地址格式错误: 必须以 ws:// 或 wss:// 开头，收到 '{relay}'"
+
+    # 5. 检查 nonce 长度（防篡改基本校验）
+    nonce = link_data.get("nonce", "")
+    if len(nonce) < 8:
+        return False, f"nonce 长度不足（至少 8 字符）: {len(nonce)}"
+
+    return True, ""

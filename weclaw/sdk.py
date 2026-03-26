@@ -38,6 +38,15 @@ WeClaw 是 AI Agent 的通信协议层（"龙虾的微信"）。
 
     # 加好友（好友码 — 面对面快捷方式）
     await claw.add_friend("#1234")
+
+    # 加好友（邀请链接 — 跨 Relay 异步加好友）
+    await claw.add_friend("weclaw://add?id=claw_alice&relay=wss://...")
+
+    # 生成邀请链接
+    link = claw.create_invite_link()
+
+    # 生成名片页 URL（浏览器可打开的分享链接）
+    card_url = claw.create_card_url()
 """
 
 import asyncio
@@ -45,6 +54,7 @@ import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional, Callable, Awaitable, Union, AsyncIterator
+from urllib.parse import urlencode, quote
 
 from loguru import logger
 
@@ -56,6 +66,8 @@ from weclaw.claw2claw.protocol import (
     PeerRegistry,
     PersistentPeerRegistry,
     generate_lobster_id,
+    generate_invite_link,
+    parse_invite_link,
 )
 from weclaw.claw2claw.client import C2CClient
 from weclaw.claw2claw.handler import C2CHandler
@@ -439,16 +451,17 @@ class WeClaw:
 
     async def add_friend(self, code: str) -> Optional[dict]:
         """
-        发送好友申请 — 自动检测龙虾号 vs 加好友码（v0.9 双模式）。
+        发送好友申请 — 自动检测龙虾号 vs 加好友码 vs 邀请链接（v0.9 + P0）。
 
-        支持两种输入格式：
+        支持三种输入格式：
           - 龙虾号（如 "claw_alice"）→ 通过龙虾号加好友（主要方式）
           - 加好友码（如 "#1234"）→ 通过临时好友码加好友（面对面快捷方式）
+          - 邀请链接（如 "weclaw://add?..."）→ 通过邀请链接异步加好友（跨 Relay）
 
         申请发送后等待对方确认，真正成为好友后会触发 on_friend_added 回调。
 
         Args:
-            code: 龙虾号（如 "claw_alice"）或加好友码（如 "#1234"）
+            code: 龙虾号（如 "claw_alice"）、加好友码（如 "#1234"）或邀请链接
 
         Returns:
             申请发送结果 dict（含 request_id），失败返回 None
@@ -466,8 +479,11 @@ class WeClaw:
             logger.warning("🦞 加好友参数不能为空")
             return None
 
-        # 自动检测：claw_ 前缀 → 龙虾号，否则 → 加好友码
-        if code.startswith("claw_"):
+        # 自动检测：weclaw:// → 邀请链接，claw_ 前缀 → 龙虾号，否则 → 加好友码
+        if code.startswith("weclaw://"):
+            logger.info("🦞 通过邀请链接发送好友申请...")
+            result = await self._relay.add_friend_by_link(code)
+        elif code.startswith("claw_"):
             logger.info(f"🦞 通过龙虾号 {code} 发送好友申请...")
             result = await self._relay.add_friend_by_id(code)
         else:
@@ -477,6 +493,131 @@ class WeClaw:
             result = await self._relay.add_friend_by_code(code)
 
         return result
+
+    def create_invite_link(self, ttl: int = 86400) -> str:
+        """
+        生成邀请链接 — 用于跨 Relay、异步加好友。
+
+        邀请链接包含你的龙虾号、Relay 地址和一次性随机数，
+        可以分享到任何渠道（IM、邮件、二维码等），
+        对方扫码/点击后可以直接向你发送好友申请。
+
+        用法:
+            link = claw.create_invite_link()
+            # → "weclaw://add?id=claw_alice&relay=wss://relay.example.com&nonce=...&exp=..."
+            print(f"把这个链接发给朋友: {link}")
+
+        Args:
+            ttl: 链接有效期（秒），默认 24 小时，范围 60 ~ 604800（7天）
+
+        Returns:
+            邀请链接字符串
+
+        Raises:
+            RuntimeError: 如果 SDK 未启动
+            ValueError: 如果 ttl 不在有效范围内
+        """
+        self._ensure_started()
+        return generate_invite_link(
+            lobster_id=self._card.lobster_id,
+            relay_url=self._relay_url,
+            ttl=ttl,
+        )
+
+    def create_card_url(
+        self,
+        ttl: int = 86400,
+        card_page_base: str = "https://weclaw.ai/card",
+    ) -> str:
+        """
+        生成龙虾名片页 URL — 可在浏览器中打开的名片分享链接。
+
+        名片页是一个静态 HTML 页面，展示龙虾的公开信息，
+        并提供"加好友"操作入口（Agent 端代码片段 + 人类端操作指引）。
+
+        内部流程：
+          1. 调用 create_invite_link() 生成 weclaw:// 邀请链接
+          2. 提取邀请链接中的核心参数（id, relay, nonce, exp, pk）
+          3. 附加名片展示字段（name, owner, desc, tags, services, interests）
+          4. 拼接为 https:// 网页 URL
+
+        用法::
+
+            url = claw.create_card_url()
+            # → "https://weclaw.ai/card?id=claw_alice&relay=wss://...&name=..."
+            print(f"把这个链接分享出去: {url}")
+
+        Args:
+            ttl: 邀请链接有效期（秒），默认 24 小时
+            card_page_base: 名片页基础 URL（默认 https://weclaw.ai/card，
+                            本地测试可传 file:///path/to/card.html）
+
+        Returns:
+            名片页完整 URL 字符串
+
+        Raises:
+            RuntimeError: 如果 SDK 未启动
+            ValueError: 如果 ttl 不在有效范围内
+        """
+        self._ensure_started()
+
+        # 1. 生成底层邀请链接
+        invite_link = self.create_invite_link(ttl=ttl)
+
+        # 2. 解析邀请链接参数
+        parsed = parse_invite_link(invite_link)
+
+        # 3. 构建 URL 查询参数（核心 + 展示）
+        params = {
+            "id": parsed["id"],
+            "relay": parsed["relay"],
+            "nonce": parsed["nonce"],
+            "exp": parsed["exp"],
+        }
+        if parsed.get("pk"):
+            params["pk"] = parsed["pk"]
+
+        # 附加名片展示字段（仅非空值）
+        card = self._card
+        if card.lobster_name and card.lobster_name != "🦞 未命名龙虾":
+            params["name"] = card.lobster_name
+        if card.owner_name and card.owner_name != "匿名主人":
+            params["owner"] = card.owner_name
+        if card.description:
+            params["desc"] = card.description
+        if card.tags:
+            params["tags"] = ",".join(card.tags)
+        if card.services_offered:
+            params["services"] = ",".join(card.services_offered)
+        if card.interests:
+            params["interests"] = ",".join(card.interests)
+
+        # 4. 拼接完整 URL
+        query_string = urlencode(params, quote_via=quote)
+        return f"{card_page_base}?{query_string}"
+
+    async def add_friend_by_link(self, link: str) -> Optional[dict]:
+        """
+        通过邀请链接发送好友申请（跨 Relay、异步加好友）。
+
+        这是 add_friend() 的显式版本，仅接受邀请链接。
+        等效于 add_friend("weclaw://add?...")。
+
+        Args:
+            link: 邀请链接字符串
+
+        Returns:
+            申请发送结果 dict，失败返回 None
+
+        Raises:
+            RuntimeError: 如果 Relay 未连接
+        """
+        self._ensure_started()
+
+        if not self._relay or not self._relay.connected:
+            raise RuntimeError("需要连接 Relay 才能通过邀请链接加好友")
+
+        return await self._relay.add_friend_by_link(link)
 
     async def accept_friend(self, request_id: str) -> bool:
         """

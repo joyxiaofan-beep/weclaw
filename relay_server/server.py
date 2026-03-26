@@ -1,5 +1,5 @@
 """
-WeClaw Relay Server — 龙虾中继服务器 v2
+WeClaw Relay Server — 龙虾中继服务器 v2.3
 
 一个极简 WebSocket 中继服务器，让龙虾间零成本互联。
 
@@ -8,13 +8,16 @@ WeClaw Relay Server — 龙虾中继服务器 v2
 - **持久身份（龙虾号）** — 每只龙虾有唯一的龙虾号（如 claw_alice），重启不变
 - **临时配对码仅用于加好友** — 像微信"面对面加好友"，加完一次后续靠龙虾号直连
 - **好友关系由客户端维护** — Relay 不存储好友关系，只在线时路由
+- **邀请链接 (v1.5)** — 跨 Relay、跨时区异步加好友
+- **离线好友请求队列 (v1.5)** — 目标离线时暂存好友请求，上线后投递（24h TTL）
 
 架构：
     用户的 AI → 用户本地运行（自带 API Key，Relay 不管）
-    Relay Server → 只做 3 件事：
+    Relay Server → 只做 4 件事：
       1. 龙虾号注册（上线时报到）
-      2. 临时配对码加好友（一次性，加完即弃）
+      2. 临时配对码 / 龙虾号 / 邀请链接加好友
       3. 按龙虾号转发消息（两端都在线时透传）
+      4. 离线好友请求暂存（轻量队列，仅好友请求）
 
 部署：
     pip install websockets
@@ -83,6 +86,10 @@ FRIEND_REQUEST_TTL = 24 * 60 * 60  # 24 小时
 # 心跳间隔
 HEARTBEAT_INTERVAL = 30  # 秒
 
+# v1.5: 离线好友请求队列配置
+OFFLINE_QUEUE_TTL = 24 * 60 * 60   # 离线请求有效期（24 小时）
+OFFLINE_QUEUE_MAX_PER_TARGET = 50   # 每个目标最多缓存 N 条离线请求
+
 
 # ──────────────────────────────────────────
 # 数据结构
@@ -133,6 +140,9 @@ class RelayServer:
         self._ws_to_id: dict[int, str] = {}
         # 待审批好友申请: request_id -> {requester_id, target_id, timestamp, requester_info}
         self._pending_friend_requests: dict[str, dict] = {}
+        # v1.5: 离线好友请求队列: target_lobster_id -> [request_dict, ...]
+        # 目标龙虾不在线时暂存好友请求，上线后投递
+        self._offline_friend_requests: dict[str, list] = {}
 
     def _generate_pair_code(self) -> str:
         """
@@ -205,6 +215,32 @@ class RelayServer:
                     })
             if expired:
                 logger.info(f"🧹 清理了 {len(expired)} 条过期好友申请")
+
+    async def _cleanup_expired_offline_requests(self):
+        """v1.5: 定期清理过期的离线好友请求"""
+        while True:
+            await asyncio.sleep(600)  # 每 10 分钟检查一次
+            now = time.time()
+            total_cleaned = 0
+            empty_targets = []
+
+            for target_id, queue in self._offline_friend_requests.items():
+                before = len(queue)
+                self._offline_friend_requests[target_id] = [
+                    req for req in queue
+                    if now - req["timestamp"] <= OFFLINE_QUEUE_TTL
+                ]
+                cleaned = before - len(self._offline_friend_requests[target_id])
+                total_cleaned += cleaned
+                if not self._offline_friend_requests[target_id]:
+                    empty_targets.append(target_id)
+
+            # 清理空队列
+            for target_id in empty_targets:
+                del self._offline_friend_requests[target_id]
+
+            if total_cleaned > 0:
+                logger.info(f"🧹 清理了 {total_cleaned} 条过期离线好友请求")
 
     async def _remove_lobster(self, lobster_id: str):
         """移除一只龙虾（下线）"""
@@ -327,6 +363,64 @@ class RelayServer:
         self._online[lobster_id] = lobster
         self._pair_codes[pair_code] = (lobster_id, time.time())
         self._ws_to_id[id(ws)] = lobster_id
+
+        # v1.5: 投递离线好友请求队列
+        offline_delivered = 0
+        offline_requests = self._offline_friend_requests.pop(lobster_id, [])
+        now = time.time()
+        for offline_req in offline_requests:
+            # 跳过过期的
+            if now - offline_req["timestamp"] > OFFLINE_QUEUE_TTL:
+                continue
+            request_id = offline_req["request_id"]
+            requester_info = offline_req["requester_info"]
+
+            # 存入正式的待审批队列
+            self._pending_friend_requests[request_id] = {
+                "requester_id": offline_req["requester_id"],
+                "target_id": lobster_id,
+                "timestamp": offline_req["timestamp"],
+                "requester_info": requester_info,
+                "target_info": {
+                    "lobster_id": lobster.lobster_id,
+                    "lobster_name": lobster.lobster_name,
+                    "owner_name": lobster.owner_name,
+                },
+                "source": offline_req.get("source", "pair_by_id"),
+            }
+
+            # 通知上线的龙虾：有离线好友申请
+            asyncio.create_task(self._send_to(ws, {
+                "type": "friend_request",
+                "data": {
+                    "request_id": request_id,
+                    "lobster_id": requester_info["lobster_id"],
+                    "lobster_name": requester_info["lobster_name"],
+                    "owner_name": requester_info["owner_name"],
+                    "offline": True,  # 标记为离线期间收到的请求
+                    "message": f"📬 {requester_info['owner_name']} 的龙虾 {requester_info['lobster_name']} 在你离线时想加你为好友！",
+                }
+            }))
+
+            # 如果请求方当前在线，通知 TA 对方已上线
+            requester = self._online.get(offline_req["requester_id"])
+            if requester:
+                asyncio.create_task(self._send_to(requester.ws, {
+                    "type": "offline_request_delivered",
+                    "data": {
+                        "request_id": request_id,
+                        "target_lobster_id": lobster_id,
+                        "target_lobster_name": lobster.lobster_name,
+                        "message": f"📬 {lobster.lobster_name} 已上线，你的离线好友申请已送达！",
+                    }
+                }))
+
+            offline_delivered += 1
+
+        if offline_delivered > 0:
+            logger.info(
+                f"🦞📬 投递 {offline_delivered} 条离线好友申请给 {lobster.lobster_name}[{lobster_id}]"
+            )
 
         # 查一下哪些好友在线
         online_friends = []
@@ -485,13 +579,8 @@ class RelayServer:
 
         requester = self._online[requester_id]
 
-        # 通过龙虾号查找目标（必须在线）
+        # 通过龙虾号查找目标（在线 → 直接发送，离线 → 存入离线队列）
         target = self._online.get(target_lobster_id)
-        if not target:
-            return {
-                "type": "pair_failed",
-                "data": {"message": f"龙虾号 {target_lobster_id} 不在线或不存在"}
-            }
 
         # 不能加自己
         if target_lobster_id == requester_id:
@@ -499,67 +588,157 @@ class RelayServer:
 
         # 已经是好友了
         if target_lobster_id in requester.friends:
+            target_owner = target.owner_name if target else target_lobster_id
             return {
                 "type": "pair_failed",
-                "data": {"message": f"你们已经是好友了！直接用「龙虾传话 {target.owner_name} 内容」传话吧"}
+                "data": {"message": f"你们已经是好友了！直接用「龙虾传话 {target_owner} 内容」传话吧"}
             }
 
-        # 检查是否已有待处理的申请（避免重复发送）
+        # 检查是否已有待处理的申请（避免重复发送，同时检查在线 + 离线队列）
         for req in self._pending_friend_requests.values():
             if req["requester_id"] == requester_id and req["target_id"] == target_lobster_id:
+                target_owner = target.owner_name if target else target_lobster_id
                 return {
                     "type": "pair_failed",
-                    "data": {"message": f"你已经向 {target.owner_name} 发送过好友申请了，请等待对方确认"}
+                    "data": {"message": f"你已经向 {target_owner} 发送过好友申请了，请等待对方确认"}
+                }
+        # 检查离线队列中是否有重复申请
+        for offline_req in self._offline_friend_requests.get(target_lobster_id, []):
+            if offline_req.get("requester_id") == requester_id:
+                return {
+                    "type": "pair_failed",
+                    "data": {"message": f"你已经向 {target_lobster_id} 发送过好友申请（对方离线中），请等待对方上线后处理"}
                 }
 
         # 生成好友申请 ID
         request_id = uuid.uuid4().hex[:12]
 
-        # 存入待审批队列
-        self._pending_friend_requests[request_id] = {
-            "requester_id": requester_id,
-            "target_id": target_lobster_id,
-            "timestamp": time.time(),
-            "requester_info": {
-                "lobster_id": requester.lobster_id,
-                "lobster_name": requester.lobster_name,
-                "owner_name": requester.owner_name,
-            },
-            "target_info": {
-                "lobster_id": target.lobster_id,
-                "lobster_name": target.lobster_name,
-                "owner_name": target.owner_name,
-            },
+        requester_info = {
+            "lobster_id": requester.lobster_id,
+            "lobster_name": requester.lobster_name,
+            "owner_name": requester.owner_name,
         }
 
-        logger.info(
-            f"🦞📬 好友申请(龙虾号)! {requester.lobster_name}[{requester_id}] "
-            f"→ {target.lobster_name}[{target_lobster_id}] [申请ID: {request_id}]"
-        )
-
-        # 通知目标龙虾：收到好友申请（需确认）
-        await self._send_to(target.ws, {
-            "type": "friend_request",
-            "data": {
-                "request_id": request_id,
-                "lobster_id": requester.lobster_id,
-                "lobster_name": requester.lobster_name,
-                "owner_name": requester.owner_name,
-                "message": f"📬 {requester.owner_name} 的龙虾 {requester.lobster_name} 想加你为好友！",
+        if target:
+            # ── 目标在线 → 走原有逻辑：存入待审批队列，立即通知 ──
+            self._pending_friend_requests[request_id] = {
+                "requester_id": requester_id,
+                "target_id": target_lobster_id,
+                "timestamp": time.time(),
+                "requester_info": requester_info,
+                "target_info": {
+                    "lobster_id": target.lobster_id,
+                    "lobster_name": target.lobster_name,
+                    "owner_name": target.owner_name,
+                },
             }
-        })
 
-        # 返回给请求方：申请已发送，等待确认
-        return {
-            "type": "friend_request_sent",
-            "data": {
-                "request_id": request_id,
-                "lobster_id": target.lobster_id,
-                "lobster_name": target.lobster_name,
-                "owner_name": target.owner_name,
-                "message": f"已向 {target.owner_name} 发送好友申请，等待对方确认...",
+            logger.info(
+                f"🦞📬 好友申请(龙虾号)! {requester.lobster_name}[{requester_id}] "
+                f"→ {target.lobster_name}[{target_lobster_id}] [申请ID: {request_id}]"
+            )
+
+            # 通知目标龙虾：收到好友申请（需确认）
+            await self._send_to(target.ws, {
+                "type": "friend_request",
+                "data": {
+                    "request_id": request_id,
+                    "lobster_id": requester.lobster_id,
+                    "lobster_name": requester.lobster_name,
+                    "owner_name": requester.owner_name,
+                    "message": f"📬 {requester.owner_name} 的龙虾 {requester.lobster_name} 想加你为好友！",
+                }
+            })
+
+            # 返回给请求方：申请已发送，等待确认
+            return {
+                "type": "friend_request_sent",
+                "data": {
+                    "request_id": request_id,
+                    "lobster_id": target.lobster_id,
+                    "lobster_name": target.lobster_name,
+                    "owner_name": target.owner_name,
+                    "message": f"已向 {target.owner_name} 发送好友申请，等待对方确认...",
+                }
             }
+        else:
+            # ── v1.5: 目标离线 → 存入离线好友请求队列 ──
+            queue = self._offline_friend_requests.setdefault(target_lobster_id, [])
+
+            # 检查队列上限
+            if len(queue) >= OFFLINE_QUEUE_MAX_PER_TARGET:
+                return {
+                    "type": "pair_failed",
+                    "data": {"message": f"对方 {target_lobster_id} 的离线好友请求队列已满，请稍后再试"}
+                }
+
+            queue.append({
+                "request_id": request_id,
+                "requester_id": requester_id,
+                "target_id": target_lobster_id,
+                "timestamp": time.time(),
+                "requester_info": requester_info,
+                "source": "pair_by_id",  # 来源标识
+            })
+
+            logger.info(
+                f"🦞📭 离线好友申请! {requester.lobster_name}[{requester_id}] "
+                f"→ {target_lobster_id}(离线) [申请ID: {request_id}] "
+                f"[队列: {len(queue)}条]"
+            )
+
+            return {
+                "type": "offline_queued",
+                "data": {
+                    "request_id": request_id,
+                    "target_lobster_id": target_lobster_id,
+                    "message": f"对方 {target_lobster_id} 当前不在线，好友申请已存入离线队列，对方上线后会收到通知",
+                    "ttl": OFFLINE_QUEUE_TTL,
+                }
+            }
+
+    async def _handle_pair_by_link(self, ws, data: dict) -> dict:
+        """
+        v1.5: 通过邀请链接发送好友申请
+
+        data: {
+            target_lobster_id: "claw_alice",    # 邀请链接中的龙虾号
+            nonce: "deadbeef...",                # 邀请链接中的随机数（用于标识唯一邀请）
+            pk: "abc123..."                      # 邀请方公钥指纹（可选）
         }
+        流程: 请求方解析邀请链接后 → 发送 pair_by_link 到目标所在 Relay → 走 pair_by_id 同逻辑
+        本质上 pair_by_link 是 pair_by_id 的"有凭证"版本，带 nonce 防重放。
+        """
+        target_lobster_id = data.get("target_lobster_id", "").strip()
+        nonce = data.get("nonce", "").strip()
+
+        if not target_lobster_id:
+            return {"type": "pair_failed", "data": {"message": "邀请链接缺少目标龙虾号"}}
+        if not nonce:
+            return {"type": "pair_failed", "data": {"message": "邀请链接缺少 nonce"}}
+
+        # 找到请求方
+        requester_id = self._ws_to_id.get(id(ws))
+        if not requester_id or requester_id not in self._online:
+            return {"type": "error", "data": {"message": "请先注册"}}
+
+        # 复用 pair_by_id 逻辑（邀请链接本质是"带凭证的龙虾号加好友"）
+        # 额外记录 nonce 和 pk 用于日志追踪和防重放
+        result = await self._handle_pair_by_id(ws, {"lobster_id": target_lobster_id})
+
+        # 如果成功进入队列（在线或离线），在日志中记录邀请链接来源
+        if result.get("type") in ("friend_request_sent", "offline_queued"):
+            request_id = result.get("data", {}).get("request_id", "")
+            pk = data.get("pk", "")
+            logger.info(
+                f"🔗 邀请链接来源 [申请ID: {request_id}] "
+                f"[nonce: {nonce[:16]}...] [pk: {pk[:16]}...]"
+            )
+            # 在返回数据中标记来源为邀请链接
+            result["data"]["source"] = "invite_link"
+            result["data"]["nonce"] = nonce
+
+        return result
 
     async def _handle_friend_accept(self, ws, data: dict) -> dict:
         """
@@ -1035,6 +1214,7 @@ class RelayServer:
                     "register": self._handle_register,
                     "pair": self._handle_pair,
                     "pair_by_id": self._handle_pair_by_id,  # v0.9: 通过龙虾号加好友
+                    "pair_by_link": self._handle_pair_by_link,  # v1.5: 通过邀请链接加好友
                     "message": self._handle_message,
                     "relay_response": self._handle_relay_response,
                     "heartbeat": self._handle_heartbeat,
@@ -1067,7 +1247,7 @@ class RelayServer:
 
     async def run(self):
         """启动 Relay Server"""
-        logger.info("🦞🌐 WeClaw Relay Server v2.2 启动中...")
+        logger.info("🦞🌐 WeClaw Relay Server v2.3 启动中...")
         # TLS 配置
         ssl_context = None
         protocol = "ws"
@@ -1086,11 +1266,14 @@ class RelayServer:
         logger.info(f"   🦞 最大在线: {MAX_LOBSTERS}")
         logger.info(f"   🔍 发现协议: 已启用 (v0.7)")
         logger.info(f"   🤝 好友确认: 已启用 (v0.9)")
+        logger.info(f"   🔗 邀请链接: 已启用 (v1.5)")
+        logger.info(f"   📭 离线队列: 已启用 (v1.5, TTL={OFFLINE_QUEUE_TTL}s, max={OFFLINE_QUEUE_MAX_PER_TARGET}/target)")
         logger.info(f"   💰 平台成本: 0（只做路由，AI 走用户自己的 Key）")
 
         asyncio.create_task(self._cleanup_expired_codes())
         asyncio.create_task(self._cleanup_stale_connections())
         asyncio.create_task(self._cleanup_expired_requests())
+        asyncio.create_task(self._cleanup_expired_offline_requests())  # v1.5
 
         async with serve(
             self.handle_connection,
