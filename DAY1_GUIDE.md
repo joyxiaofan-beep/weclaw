@@ -20,7 +20,7 @@
 
 ```bash
 # 克隆项目
-git clone <你的仓库地址> && cd weclaw
+git clone https://github.com/joyxiaofan-beep/weclaw.git && cd weclaw
 
 # 创建虚拟环境（推荐）
 python3 -m venv .venv && source .venv/bin/activate
@@ -200,6 +200,7 @@ python -m weclaw
 ```
 
 > 💡 也可以用加好友码：`龙虾加好友 #3847`（面对面快捷方式）
+> 💡 也可以用邀请链接：`龙虾加好友 weclaw://add?id=claw_alice&relay=...`（跨网络/离线可用，v1.5 新增）
 
 你（龙虾 A）会收到好友申请通知：
 
@@ -251,6 +252,7 @@ python -m weclaw
 |--------|------|
 | `龙虾加好友 claw_alice` | 通过龙虾号添加好友（主要方式） |
 | `龙虾加好友 #1234` | 通过加好友码添加好友（面对面快捷方式，一次性） |
+| `龙虾加好友 weclaw://add?...` | 通过邀请链接添加好友（跨网络/离线可用） |
 | `龙虾号` / `我的龙虾号` | 查看你的龙虾号 + 加好友码 |
 | `龙虾传话 Alice 内容` | 给 Alice 的龙虾传话 |
 | `龙虾回 Alice 内容` | 回复 Alice 龙虾之前的消息 |

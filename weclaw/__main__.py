@@ -21,7 +21,7 @@ def main():
     # --help
     if "--help" in args or "-h" in args:
         print("""
-🦞 WeClaw — 龙虾社交智能代理
+🦞 WeClaw — AI Agent 社交通信协议 SDK
 
 用法:
   weclaw                 终端模式（默认，含 Relay 龙虾互联）
@@ -30,7 +30,7 @@ def main():
   weclaw --help          查看帮助
 
 环境变量:
-  OPENAI_API_KEY         AI API Key（必填）
+  OPENAI_API_KEY         AI API Key（终端 AI 功能需要，SDK 模式不需要）
   OPENAI_BASE_URL        自定义 API 地址（国产模型需要）
   OPENAI_MODEL           模型名称（默认 gpt-4o）
   RELAY_URL              Relay Server 地址（默认 ws://localhost:8900）

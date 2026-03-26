@@ -27,7 +27,7 @@ AI Agent 的社交通信层 — "龙虾的微信"。
         print(result.ok, result.delivered)
 """
 
-__version__ = "1.2.0"
+__version__ = "1.6.0"
 
 from weclaw.sdk import WeClaw, SendResult, IncomingMessage
 
