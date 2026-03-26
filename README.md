@@ -286,6 +286,7 @@ url = claw.create_card_url()
 | `Edit 3 new content` | Edits then sends |
 | `Add friend claw_alice` | 🌐 Sends friend request by lobster ID (primary method) |
 | `Add friend #1234` | 🌐 Sends friend request by friend code (face-to-face shortcut) |
+| `Add friend weclaw://add?...` | 🌐 Sends friend request via invite link (cross-network / offline) |
 | `Accept <lobster_id>` | 🌐 Accept a friend request |
 | `Reject <lobster_id>` | 🌐 Reject a friend request |
 | `Friend requests` | 🌐 Lists pending friend requests |
